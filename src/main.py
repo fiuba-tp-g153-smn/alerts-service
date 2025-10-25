@@ -3,8 +3,8 @@ from fastapi import FastAPI
 from controller import general
 
 app: FastAPI = FastAPI(
-    title="users-service",
-    description="Servicio que maneja la gestión de usuarios",
+    title="alerts-service",
+    description="Servicio que maneja la gestión de alertas",
     contact={
         "name": "FIUBA TPF Team N°153 Altamirano, Diem, Gismondi, Valeriani",
     },

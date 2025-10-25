@@ -6,7 +6,7 @@ ROOT_RESPONSES: Dict[int | str, Dict[str, Any]] = {
         "description": "Service is running correctly",
         "content": {
             "application/json": {
-                "example": {"status": "ok", "service": "users-service"}
+                "example": {"status": "ok", "service": "alerts-service"}
             }
         },
     }

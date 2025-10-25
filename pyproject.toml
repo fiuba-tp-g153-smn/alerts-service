@@ -1,7 +1,7 @@
 [project]
-name = "users-service"
+name = "alerts-service"
 version = "0.1.0"
-description = "Servicio que maneja la gestión de usuarios"
+description = "Servicio que maneja la gestión de alertas"
 authors = [
     { name = "Agustín Altamirano", email = " aaltamirano@fi.uba.ar" },
     { name = "Gabriel Diem", email = "wdiem@fi.uba.ar" },

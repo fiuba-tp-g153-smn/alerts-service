@@ -1,6 +1,6 @@
-# Users Service - SMN
+# Alerts Service - SMN
 
-The Users Service is a Python-based microservice built with FastAPI for managing user operations. It handles user creation, authentication, and related functionalities in a RESTful API.
+The Alerts Service is a Python-based microservice built with FastAPI for managing alerts operations.
 
 ### Team members
 
