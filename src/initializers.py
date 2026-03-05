@@ -1,8 +1,11 @@
+# Standard library imports
 import logging
 from logging import Logger
 
+# Third-party imports
 from newrelic.agent import NewRelicContextFormatter
 
+# Local imports
 from settings import Settings
 
 DEFAULT_LOG_LEVEL: str = "INFO"

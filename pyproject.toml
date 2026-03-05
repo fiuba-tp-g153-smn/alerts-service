@@ -1,23 +1,38 @@
+
+
 [project]
 name = "alerts-service"
 version = "0.1.0"
 description = "Servicio que maneja la gestión de alertas"
 authors = [
-    { name = "Agustín Altamirano", email = " aaltamirano@fi.uba.ar" },
+    { name = "Agustín Altamirano", email = "aaltamirano@fi.uba.ar" },
     { name = "Gabriel Diem", email = "wdiem@fi.uba.ar" },
     { name = "Máximo Gismondi", email = "magismondi@fi.uba.ar" },
-    { name = "Matías Valeriani", email = "mvaleriani@fi.uba.ar" },
+    { name = "Matías Valeriani", email = "mvaleriani@fi.uba.ar" }
 ]
-readme = {file = "README.md", content-type = "text/markdown"}
-requires-python = ">=3.13,<4.0"
-dependencies = ["fastapi (>=0.119.1,<0.120.0)", "newrelic (>=11.0.1,<12.0.0)", "uvicorn (>=0.38.0,<0.39.0)", "python-dotenv (>=1.1.1,<2.0.0)"]
-
-[tool.setuptools.dynamic]
-version = {file = "version.txt"}
+readme = "README.md"
+requires-python = ">=3.10,<4.0"
+dependencies = [
+    "fastapi>=0.119.1,<0.120.0",
+    "newrelic>=11.0.1,<12.0.0",
+    "uvicorn>=0.38.0,<0.39.0",
+    "python-dotenv>=1.1.1,<2.0.0",
+    "geopandas>=0.14.3",
+    "shapely>=2.0.2",
+    "requests>=2.31.0",
+    "aiohttp>=3.9.3",
+    "pandas>=2.2.1",
+    "fiona>=1.9.5",
+    "pyproj>=3.6.1"
+]
 
 [tool.poetry]
 packages = [{ include = "src" }]
 package-mode = false
+
+[tool.setuptools.dynamic]
+version = {file = "version.txt"}
+
 
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]

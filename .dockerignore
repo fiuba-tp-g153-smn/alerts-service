@@ -12,4 +12,3 @@ env
 .git
 .venv
 .gitignore
-README.md

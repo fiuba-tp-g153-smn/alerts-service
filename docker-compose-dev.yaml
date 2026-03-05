@@ -1,0 +1,43 @@
+# Alerts Service - Geographic Intersection API (Development)
+#
+# This service provides endpoints for geographic intersection operations:
+# - Intersect polygon with Argentina's territory
+# - Intersect polygon with Argentine departments
+#
+# Features:
+# - Downloads and simplifies IGN geographic layers on startup
+# - Caches processed data in ./data volume for fast restarts
+# - Hot-reload enabled for development
+#
+# Usage:
+#   docker compose -f docker-compose-dev.yaml up
+#
+# Access:
+#   - API: http://localhost:8080
+#   - Swagger docs: http://localhost:8080/docs
+
+services:
+  alerts-service:
+    container_name: alerts-service-dev-container
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    ports:
+      - "${APP_HOST_PORT:-8080}:8080"
+    restart: unless-stopped
+    volumes:
+      - ./src:/app
+      - ./scripts:/app/scripts
+      - ./data:/app/data
+      - ./.env:/app/.env:ro
+    environment:
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - APP_ENV=${APP_ENV:-development}
+      - OGR_GEOJSON_MAX_OBJ_SIZE=0
+      - SIMPLIFY_TOLERANCE=${SIMPLIFY_TOLERANCE:-0.01}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
