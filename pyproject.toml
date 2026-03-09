@@ -48,3 +48,4 @@ dev = [
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 addopts = "--disable-socket --allow-hosts=127.0.0.1"
+testpaths = ["tests/application"]
