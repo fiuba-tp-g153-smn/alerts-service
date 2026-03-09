@@ -29,10 +29,10 @@ services:
     volumes:
       - alerts_service_data:/app/data
     environment:
-      - LOG_LEVEL=${LOG_LEVEL:-INFO}
-      - APP_ENV=${APP_ENV:-production}
+      - LOG_LEVEL=${LOG_LEVEL}
+      - APP_ENV=${APP_ENV}
       - OGR_GEOJSON_MAX_OBJ_SIZE=0
-      - SIMPLIFY_TOLERANCE=${SIMPLIFY_TOLERANCE:-0.01}
+      - SIMPLIFY_TOLERANCE=${SIMPLIFY_TOLERANCE}
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
       interval: 30s
