@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from container import get_batch_manager
+from container import get_batch_manager, get_geo_repo
 from controller import general, intersections
 from dependencies import logger, settings
 from scheduler import setup_scheduler
@@ -21,6 +21,10 @@ async def lifespan(_app: FastAPI):
 
     logger.info("Application startup: initializing batch manager ...")
     batch_manager = get_batch_manager()
+
+    logger.info("Application startup: preloading simplified geo layers ...")
+    geo_repo = get_geo_repo()
+    geo_repo.preload()
 
     logger.info("Application startup complete.")
 

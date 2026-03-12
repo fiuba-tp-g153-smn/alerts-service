@@ -37,11 +37,11 @@ def get_batch_manager() -> FullresBatchManager:
     return FullresBatchManager(logger)
 
 
-def get_geo_repo(
-    settings: Settings = Depends(get_settings),
-    logger: Logger = Depends(get_logger),
-) -> FileSystemGeoLayerRepository:
-    """Return a filesystem-backed geo layer repository."""
+@lru_cache
+def get_geo_repo() -> FileSystemGeoLayerRepository:
+    """Return a singleton filesystem-backed geo layer repository."""
+    settings = get_settings()
+    logger = init_logger(settings)
     return FileSystemGeoLayerRepository(settings.data_dir, logger)
 
 

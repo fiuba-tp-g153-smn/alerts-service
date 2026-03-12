@@ -17,3 +17,7 @@ class IGeoLayerRepository(ABC):
     @abstractmethod
     def get_layer_path(self, layer: LayerType, simplified: bool) -> str:
         """Return the filesystem path for the given layer and resolution without loading it."""
+
+    @abstractmethod
+    def preload(self) -> None:
+        """Preload layers into memory."""
