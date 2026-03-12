@@ -12,7 +12,8 @@ from shapely.geometry import shape
 
 # Local imports
 from controller.responses import HEALTH_RESPONSES, ROOT_RESPONSES
-from dependencies import logger
+from dependencies import logger, settings
+from scheduler import get_history_tracker
 
 router = APIRouter()
 
@@ -166,3 +167,15 @@ def intersect_departments(
         return {"departments": features}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get(
+    "/layer-refresh-history",
+    tags=["General"],
+    summary="Layer refresh job history",
+    response_description="Returns recent layer refresh job runs",
+)
+def layer_refresh_history(limit: int = Query(20, ge=1, le=100)):
+    """Return the most recent layer refresh job run records."""
+    tracker = get_history_tracker(settings)
+    return {"runs": tracker.get_recent(limit)}

@@ -38,3 +38,6 @@ test-api:
 # Results saved in tests/ directory as GeoJSON files
 	@echo "Running API integration tests..."
 	@cd tests && python3 test_alerts_api.py
+
+precommit:
+	pre-commit run --all-files

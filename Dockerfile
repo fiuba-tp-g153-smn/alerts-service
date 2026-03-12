@@ -21,9 +21,6 @@ FROM python:3.13.12-slim-trixie AS runner
 
 WORKDIR /app
 
-# Install cron
-RUN apt-get update && apt-get install -y --no-install-recommends cron && rm -rf /var/lib/apt/lists/*
-
 # Use python implementation of protobuf instead of binary
 ENV PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION=python
 
@@ -33,21 +30,14 @@ COPY --from=builder /usr/local/bin /usr/local/bin
 
 # Copy the actual application code into /app
 COPY ./src /app
-COPY ./scripts /app/scripts
 
-# Copy cron configuration and entrypoint script
-COPY crontab /etc/cron.d/geo-preprocessing
+# Copy entrypoint script
 COPY entrypoint.sh /entrypoint.sh
-
-# Set up cron job
-RUN chmod 0644 /etc/cron.d/geo-preprocessing && \
-    chmod +x /entrypoint.sh && \
-    crontab /etc/cron.d/geo-preprocessing
+RUN chmod +x /entrypoint.sh
 
 # Expose port 8080 (FastAPI main.py sets default to 8080)
 EXPOSE 8080
 
-# Use entrypoint script to start cron and run initial preprocessing
 ENTRYPOINT ["/entrypoint.sh"]
 
 # Run the app with uvicorn

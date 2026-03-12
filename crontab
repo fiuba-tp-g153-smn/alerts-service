@@ -1,4 +1,0 @@
-# Run geo preprocessing script on the 1st day of every month at 3 AM
-0 3 1 * * cd /app && /usr/local/bin/python3 /app/scripts/download_and_simplify_layers.py >> /var/log/cron.log 2>&1
-
-# Empty line required at end of crontab file

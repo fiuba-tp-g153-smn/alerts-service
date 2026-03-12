@@ -1,7 +1,20 @@
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from controller import general
+from dependencies import logger, settings
+from scheduler import setup_scheduler
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    scheduler = await setup_scheduler(settings, logger)
+    scheduler.start()
+    yield
+    scheduler.shutdown()
+
 
 app: FastAPI = FastAPI(
     title="alerts-service",
@@ -9,6 +22,7 @@ app: FastAPI = FastAPI(
     contact={
         "name": "FIUBA TPF Team N°153 Altamirano, Diem, Gismondi, Valeriani",
     },
+    lifespan=lifespan,
 )
 
 # Configure CORS

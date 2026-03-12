@@ -7,23 +7,57 @@ load_dotenv()
 
 class Settings:
     """
-    Application settings management using Pydantic.
-    Handles configuration loading for the application from environment variables.
+    Application settings management.
+    Handles configuration loading from environment variables.
     """
 
     log_level: str = ""
     app_env: str = ""
 
+    # S3 / object storage
+    s3_endpoint: str = ""
+    s3_access_key: str = ""
+    s3_secret_key: str = ""
+    s3_bucket_name: str = ""
+    s3_secure: bool = True
+
+    # Scheduler
+    layer_update_cron: str = "0 3 1 * *"
+
+    # Geospatial
+    data_dir: str = "/app/data"
+    simplify_tolerance: float = 0.01
+    country_geojson_url: str = (
+        "https://wms.ign.gob.ar/geoserver/ows"
+        "?service=WFS&version=1.0.0&request=GetFeature"
+        "&typeName=ign:pais&outputFormat=application/json"
+    )
+    departments_geojson_url: str = (
+        "https://wms.ign.gob.ar/geoserver/ows"
+        "?service=WFS&version=1.0.0&request=GetFeature"
+        "&typeName=ign:departamento&outputFormat=application/json"
+    )
+
     def __init__(self):
-        # Load from environment variables
         self._load_from_env()
 
     def _load_from_env(self) -> None:
-        """Load all configuration values directly from environment variables."""
         self.log_level = os.getenv("LOG_LEVEL", self.log_level)
         self.app_env = os.getenv("APP_ENV", self.app_env)
 
+        self.s3_endpoint = os.getenv("S3_ENDPOINT", self.s3_endpoint)
+        self.s3_access_key = os.getenv("S3_ACCESS_KEY", self.s3_access_key)
+        self.s3_secret_key = os.getenv("S3_SECRET_KEY", self.s3_secret_key)
+        self.s3_bucket_name = os.getenv("S3_BUCKET_NAME", self.s3_bucket_name)
+        self.s3_secure = os.getenv("S3_SECURE", str(self.s3_secure)).lower() not in ("false", "0", "no")
+
+        self.layer_update_cron = os.getenv("LAYER_UPDATE_CRON", self.layer_update_cron)
+
+        self.data_dir = os.getenv("DATA_DIR", self.data_dir)
+        self.simplify_tolerance = float(os.getenv("SIMPLIFY_TOLERANCE", str(self.simplify_tolerance)))
+        self.country_geojson_url = os.getenv("COUNTRY_GEOJSON_URL", self.country_geojson_url)
+        self.departments_geojson_url = os.getenv("DEPARTMENTS_GEOJSON_URL", self.departments_geojson_url)
+
     @staticmethod
     def get_settings() -> "Settings":
-        """Factory method to create and return a Settings instance."""
         return Settings()

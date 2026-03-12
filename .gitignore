@@ -70,3 +70,5 @@ data/
 tests/country_*.json
 tests/departments_*.json
 tests/departments_*.geojson
+
+.claude
