@@ -10,7 +10,7 @@ if TYPE_CHECKING:
     from settings import Settings
 
 
-class S3Client:
+class S3ObjectStorage:
     def __init__(self, settings: "Settings", logger: Logger):
         self.settings = settings
         self.logger = logger
@@ -32,42 +32,42 @@ class S3Client:
             kwargs["endpoint_url"] = endpoint
         return kwargs
 
-    async def upload_file(self, local_path: str, s3_key: str) -> None:
+    async def upload(self, local_path: str, key: str) -> None:
         self.logger.info(
-            f"Uploading {local_path} → s3://{self.settings.s3_bucket_name}/{s3_key}"
+            f"Uploading {local_path} → s3://{self.settings.s3_bucket_name}/{key}"
         )
         async with self._session.client("s3", **self._client_kwargs()) as s3:
-            await s3.upload_file(local_path, self.settings.s3_bucket_name, s3_key)
+            await s3.upload_file(local_path, self.settings.s3_bucket_name, key)
 
-    async def list_objects(self, prefix: str) -> list[str]:
+    async def list_keys(self, prefix: str) -> list[str]:
         async with self._session.client("s3", **self._client_kwargs()) as s3:
             resp = await s3.list_objects_v2(
                 Bucket=self.settings.s3_bucket_name, Prefix=prefix
             )
             return [obj["Key"] for obj in resp.get("Contents", [])]
 
-    async def delete_file(self, s3_key: str) -> None:
-        self.logger.info(f"Deleting s3://{self.settings.s3_bucket_name}/{s3_key}")
+    async def delete(self, key: str) -> None:
+        self.logger.info(f"Deleting s3://{self.settings.s3_bucket_name}/{key}")
         async with self._session.client("s3", **self._client_kwargs()) as s3:
-            await s3.delete_object(Bucket=self.settings.s3_bucket_name, Key=s3_key)
+            await s3.delete_object(Bucket=self.settings.s3_bucket_name, Key=key)
 
-    async def download_file(self, s3_key: str, local_path: str) -> bool:
+    async def download(self, key: str, local_path: str) -> bool:
         """Returns True if downloaded successfully, False if key does not exist."""
         try:
             async with self._session.client("s3", **self._client_kwargs()) as s3:
                 os.makedirs(os.path.dirname(local_path), exist_ok=True)
-                await s3.download_file(self.settings.s3_bucket_name, s3_key, local_path)
+                await s3.download_file(self.settings.s3_bucket_name, key, local_path)
             self.logger.info(
-                f"Restored s3://{self.settings.s3_bucket_name}/{s3_key} → {local_path}"
+                f"Restored s3://{self.settings.s3_bucket_name}/{key} → {local_path}"
             )
             return True
         except ClientError as e:
             if e.response["Error"]["Code"] in ("404", "NoSuchKey"):
                 self.logger.info(
-                    f"s3://{self.settings.s3_bucket_name}/{s3_key} not found."
+                    f"s3://{self.settings.s3_bucket_name}/{key} not found."
                 )
                 return False
             raise
         except (EndpointConnectionError, BotoCoreError, Exception) as e:
-            self.logger.warning(f"S3 unreachable, skipping restore for {s3_key}: {e}")
+            self.logger.warning(f"S3 unreachable, skipping restore for {key}: {e}")
             return False

@@ -1,0 +1,99 @@
+import time
+
+from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import JSONResponse
+
+from container import get_history_repo, get_intersection_service, get_logger
+from controller.schemas import GeoJSONInput
+from ports.history_repository import IHistoryRepository
+from services.geo_intersection_service import GeoIntersectionService
+
+router = APIRouter(prefix="/intersect", tags=["Geo Intersection"])
+
+
+@router.post(
+    "/country",
+    summary="Intersect polygon with Argentina",
+    response_description="Returns intersection with Argentina's territory",
+)
+def intersect_country(
+    geojson: GeoJSONInput,
+    use_simplified: bool = Query(
+        True, description="Use simplified geometries (faster, lower detail)"
+    ),
+    service: GeoIntersectionService = Depends(get_intersection_service),
+    logger=Depends(get_logger),
+):
+    """
+    Return the intersection of the input polygon (GeoJSON) with Argentina's territory.
+
+    Input: GeoJSON Geometry, Feature, or FeatureCollection.
+    Output: GeoJSON FeatureCollection of intersection(s).
+    """
+    start_time = time.time()
+    try:
+        geometry = geojson.extract_geometry()
+        result = service.intersect_country(geometry, use_simplified)
+        elapsed = time.time() - start_time
+        logger.info(f"intersect_country (simplified={use_simplified}): {elapsed:.3f}s")
+        return JSONResponse(content=result)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post(
+    "/departments",
+    summary="Intersect polygon with departments",
+    response_description="Returns list of intersecting departments with geometries",
+)
+def intersect_departments(
+    geojson: GeoJSONInput,
+    use_simplified: bool = Query(
+        True, description="Use simplified geometries (faster, lower detail)"
+    ),
+    service: GeoIntersectionService = Depends(get_intersection_service),
+    logger=Depends(get_logger),
+):
+    """
+    Return a list of departments intersecting the input polygon (GeoJSON).
+
+    Each result includes department properties, the full geometry, and the intersection geometry.
+
+    Input: GeoJSON Geometry, Feature, or FeatureCollection.
+    Output: List of departments with intersection and full geometry.
+    """
+    start_time = time.time()
+    try:
+        geometry = geojson.extract_geometry()
+        features = service.intersect_departments(geometry, use_simplified)
+        elapsed = time.time() - start_time
+        logger.info(
+            f"intersect_departments (simplified={use_simplified}): {elapsed:.3f}s"
+        )
+        return {"departments": features}
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get(
+    "/layer-refresh-history",
+    tags=["General"],
+    summary="Layer refresh job history",
+    response_description="Returns recent layer refresh job runs",
+)
+def layer_refresh_history(
+    limit: int = Query(20, ge=1, le=100),
+    history_repo: IHistoryRepository = Depends(get_history_repo),
+    logger=Depends(get_logger),
+):
+    """Return the most recent layer refresh job run records."""
+    logger.info(f"Layer refresh history requested (limit={limit})")
+    return {"runs": history_repo.get_recent(limit)}

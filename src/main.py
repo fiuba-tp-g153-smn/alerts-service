@@ -3,7 +3,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from controller import general
+from controller import general, intersections
 from dependencies import logger, settings
 from scheduler import setup_scheduler
 
@@ -11,10 +11,14 @@ from scheduler import setup_scheduler
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Application startup: initializing scheduler ...")
+
     scheduler = await setup_scheduler(settings, logger)
     scheduler.start()
+
     logger.info("Application startup complete.")
+
     yield
+
     logger.info("Application shutdown: stopping scheduler ...")
     scheduler.shutdown()
     logger.info("Scheduler stopped.")
@@ -32,12 +36,11 @@ app: FastAPI = FastAPI(
 # Configure CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "*"
-    ],  # Allow all origins - can be restricted to ["http://localhost:4200"] if needed
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 app.include_router(general.router)
+app.include_router(intersections.router)

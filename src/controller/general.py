@@ -1,68 +1,11 @@
-# Standard library imports
-import glob
-import json
-import os
-import time
-from typing import Any, Dict
+from fastapi import APIRouter, Depends, Query, status
 
-import geopandas as gpd
-
-# Third-party imports
-from fastapi import APIRouter, HTTPException, Query, status
-from fastapi.responses import JSONResponse
-from shapely.geometry import shape
-
-# Local imports
+from container import get_logger
 from controller.responses import HEALTH_RESPONSES, ROOT_RESPONSES
-from dependencies import logger, settings
-from scheduler import get_history_tracker
 
 router = APIRouter()
 
-DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "data")
 
-
-def _latest_local(stem: str) -> str:
-    matches = sorted(glob.glob(os.path.join(DATA_DIR, f"{stem}_????????.geojson")))
-    if not matches:
-        raise HTTPException(status_code=500, detail=f"No data file found for {stem}")
-    return matches[-1]
-
-
-# Helper functions
-def extract_geometry(geojson: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Extract geometry from various GeoJSON formats.
-    Supports: Geometry, Feature, and FeatureCollection.
-    """
-    geojson_type = geojson.get("type", "").lower()
-
-    if geojson_type == "featurecollection":
-        # Extract first feature's geometry
-        features = geojson.get("features", [])
-        if not features:
-            raise ValueError("FeatureCollection is empty")
-        return features[0].get("geometry")
-    elif geojson_type == "feature":
-        # Extract geometry from feature
-        return geojson.get("geometry")
-    else:
-        # Assume it's already a geometry
-        return geojson
-
-
-def load_gdf(path: str) -> gpd.GeoDataFrame:
-    """Load a GeoDataFrame from a file, raising HTTP 500 if missing."""
-    if not os.path.exists(path):
-        raise HTTPException(status_code=500, detail=f"Missing data file: {path}")
-    t0 = time.time()
-    logger.info(f"Loading GeoDataFrame: {path}")
-    gdf = gpd.read_file(path)
-    logger.info(f"Loaded {path} in {time.time()-t0:.3f}s ({len(gdf)} features)")
-    return gdf
-
-
-# General endpoints
 @router.get(
     "/",
     status_code=status.HTTP_200_OK,
@@ -71,7 +14,7 @@ def load_gdf(path: str) -> gpd.GeoDataFrame:
     response_description="Return service status",
     responses=ROOT_RESPONSES,
 )
-def root():
+def root(logger=Depends(get_logger)):
     """Check if the API service is up and running."""
     logger.info("Root endpoint was accessed")
     return {"status": "ok", "service": "alerts-service"}
@@ -85,132 +28,7 @@ def root():
     response_description="Returns 200 if service is healthy",
     responses=HEALTH_RESPONSES,
 )
-def health_check():
+def health_check(logger=Depends(get_logger)):
     """Perform a health check of the service."""
     logger.info("Health check")
     return {"status": "running"}
-
-
-# Geo intersection endpoints
-@router.post(
-    "/intersect-country",
-    tags=["Geo Intersection"],
-    summary="Intersect polygon with Argentina",
-    response_description="Returns intersection with Argentina's territory",
-)
-def intersect_country(
-    geojson: Dict[str, Any],
-    use_simplified: bool = Query(
-        True, description="Use simplified geometries (faster, lower detail)"
-    ),
-):
-    """
-    Return the intersection of the input polygon (GeoJSON) with Argentina's territory.
-
-    Input: GeoJSON Geometry, Feature, or FeatureCollection.
-    Output: GeoJSON FeatureCollection of intersection(s).
-    """
-    start_time = time.time()
-    try:
-        geometry = extract_geometry(geojson)
-        input_geom = shape(geometry)
-        country_path = (
-            _latest_local("pais_simple") if use_simplified else _latest_local("pais")
-        )
-
-        t0 = time.time()
-        country_gdf = load_gdf(country_path)
-        logger.info(f"intersect_country: load={time.time()-t0:.3f}s")
-
-        t0 = time.time()
-        intersection = country_gdf[country_gdf.intersects(input_geom)]
-        intersection = intersection.intersection(input_geom)
-        logger.info(f"intersect_country: intersect={time.time()-t0:.3f}s")
-
-        t0 = time.time()
-        result = json.loads(intersection.to_json())
-        logger.info(f"intersect_country: serialize={time.time()-t0:.3f}s")
-
-        elapsed = time.time() - start_time
-        logger.info(f"intersect_country (simplified={use_simplified}): {elapsed:.3f}s")
-        return JSONResponse(content=result)
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-
-@router.post(
-    "/intersect-departments",
-    tags=["Geo Intersection"],
-    summary="Intersect polygon with departments",
-    response_description="Returns list of intersecting departments with geometries",
-)
-def intersect_departments(
-    geojson: Dict[str, Any],
-    use_simplified: bool = Query(
-        True, description="Use simplified geometries (faster, lower detail)"
-    ),
-):
-    """
-    Return a list of departments intersecting the input polygon (GeoJSON).
-
-    Each result includes department properties, the full geometry, and the intersection geometry.
-
-    Input: GeoJSON Geometry, Feature, or FeatureCollection.
-    Output: List of departments with intersection and full geometry.
-    """
-    start_time = time.time()
-    try:
-        geometry = extract_geometry(geojson)
-        input_geom = shape(geometry)
-        deptos_path = (
-            _latest_local("departamentos_simple")
-            if use_simplified
-            else _latest_local("departamentos")
-        )
-
-        t0 = time.time()
-        deptos_gdf = load_gdf(deptos_path)
-        logger.info(f"intersect_departments: load={time.time()-t0:.3f}s")
-
-        t0 = time.time()
-        mask = deptos_gdf.intersects(input_geom)
-        intersecting = deptos_gdf[mask].copy()
-        intersecting["intersection"] = intersecting["geometry"].intersection(input_geom)
-        logger.info(f"intersect_departments: intersect={time.time()-t0:.3f}s")
-
-        t0 = time.time()
-        features = []
-        for _, row in intersecting.iterrows():
-            features.append(
-                {
-                    "properties": {
-                        k: row[k]
-                        for k in row.index
-                        if k not in ("geometry", "intersection")
-                    },
-                    "geometry": row["geometry"].__geo_interface__,
-                    "intersection": row["intersection"].__geo_interface__,
-                }
-            )
-        logger.info(f"intersect_departments: serialize={time.time()-t0:.3f}s")
-
-        elapsed = time.time() - start_time
-        logger.info(
-            f"intersect_departments (simplified={use_simplified}): {elapsed:.3f}s"
-        )
-        return {"departments": features}
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-
-@router.get(
-    "/layer-refresh-history",
-    tags=["General"],
-    summary="Layer refresh job history",
-    response_description="Returns recent layer refresh job runs",
-)
-def layer_refresh_history(limit: int = Query(20, ge=1, le=100)):
-    """Return the most recent layer refresh job run records."""
-    logger.info(f"Layer refresh history requested (limit={limit})")
-    tracker = get_history_tracker(settings)
-    return {"runs": tracker.get_recent(limit)}

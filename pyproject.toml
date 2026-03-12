@@ -40,7 +40,7 @@ pylint = "^4.0.5"
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 addopts = "--disable-socket --allow-hosts=127.0.0.1"
-testpaths = ["tests/application"]
+testpaths = ["tests/application", "tests/unit"]
 
 [tool.pylint.main]
 init-hook = "import sys; sys.path.insert(0, 'src')"

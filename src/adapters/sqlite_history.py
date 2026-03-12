@@ -1,14 +1,12 @@
 import json
 import sqlite3
 from datetime import datetime
-from logging import Logger
 from typing import Any, Dict, List, Optional
 
 
-class HistoryTracker:
-    def __init__(self, db_path: str, logger: Optional[Logger] = None):
+class SqliteHistoryRepository:
+    def __init__(self, db_path: str):
         self.db_path = db_path
-        self.logger = logger
         self._init_db()
 
     def _init_db(self) -> None:
@@ -46,10 +44,6 @@ class HistoryTracker:
                 ),
             )
             conn.commit()
-        if self.logger:
-            self.logger.info(
-                f"Job run recorded: status={status}, duration={duration_sec:.1f}s"
-            )
 
     def get_recent(self, limit: int = 20) -> List[Dict[str, Any]]:
         with sqlite3.connect(self.db_path) as conn:
