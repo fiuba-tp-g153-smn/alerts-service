@@ -5,8 +5,10 @@ import sqlite3
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
+from ports.history_repository import IHistoryRepository
 
-class SqliteHistoryRepository:
+
+class SqliteHistoryRepository(IHistoryRepository):
     """Persists layer refresh job run records in a local SQLite database."""
 
     def __init__(self, db_path: str):

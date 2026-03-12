@@ -8,11 +8,13 @@ import aioboto3
 from botocore.config import Config
 from botocore.exceptions import BotoCoreError, ClientError, EndpointConnectionError
 
+from ports.object_storage import IObjectStorage
+
 if TYPE_CHECKING:
     from settings import Settings
 
 
-class S3ObjectStorage:
+class S3ObjectStorage(IObjectStorage):
     """Async S3 client for uploading, downloading, listing, and deleting objects."""
 
     def __init__(self, settings: "Settings", logger: Logger):
@@ -71,7 +73,7 @@ class S3ObjectStorage:
             )
             return True
         except ClientError as e:
-            if e.response["Error"]["Code"] in ("404", "NoSuchKey"):
+            if e.response.get("Error", {}).get("Code") in ("404", "NoSuchKey"):
                 self.logger.info(
                     f"s3://{self.settings.s3_bucket_name}/{key} not found."
                 )

@@ -8,6 +8,7 @@ from logging import Logger
 import geopandas as gpd
 
 from domain.models import LayerType
+from ports.geo_repository import IGeoLayerRepository
 
 _LAYER_STEMS = {
     (LayerType.COUNTRY, True): "pais_simple",
@@ -25,7 +26,9 @@ def _versioned_stem(data_dir: str, stem: str) -> str:
     return matches[-1]
 
 
-class FileSystemGeoLayerRepository:  # pylint: disable=too-few-public-methods
+class FileSystemGeoLayerRepository(
+    IGeoLayerRepository
+):  # pylint: disable=too-few-public-methods
     """Loads GeoDataFrames from versioned GeoJSON files on disk."""
 
     def __init__(self, data_dir: str, logger: Logger):
