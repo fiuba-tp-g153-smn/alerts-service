@@ -1,5 +1,7 @@
 # Alerts Service - SMN
 
+<img src="https://uptime.mapasmn.com/api/badge/11/status?style=flat-square" /> <img src="https://uptime.mapasmn.com/api/badge/11/uptime?style=flat-square" /> <img src="https://uptime.mapasmn.com/api/badge/11/ping?style=flat-square" />
+
 Servicio de intersección geográfica para el sistema de alertas meteorológicas. Provee endpoints REST para calcular intersecciones de polígonos con el territorio argentino y sus departamentos, utilizando datos del Instituto Geográfico Nacional (IGN).
 
 ### Team members
