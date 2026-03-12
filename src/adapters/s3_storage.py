@@ -1,3 +1,5 @@
+"""AWS S3-compatible object storage adapter using aioboto3."""
+
 import os
 from logging import Logger
 from typing import TYPE_CHECKING
@@ -11,12 +13,16 @@ if TYPE_CHECKING:
 
 
 class S3ObjectStorage:
+    """Async S3 client for uploading, downloading, listing, and deleting objects."""
+
     def __init__(self, settings: "Settings", logger: Logger):
+        """Initialise with application settings and a logger."""
         self.settings = settings
         self.logger = logger
         self._session = aioboto3.Session()
 
     def _client_kwargs(self) -> dict:
+        """Build the keyword arguments for the boto3 S3 client."""
         kwargs: dict = {
             "aws_access_key_id": self.settings.s3_access_key,
             "aws_secret_access_key": self.settings.s3_secret_key,
@@ -33,6 +39,7 @@ class S3ObjectStorage:
         return kwargs
 
     async def upload(self, local_path: str, key: str) -> None:
+        """Upload a local file to S3 under the given key."""
         self.logger.info(
             f"Uploading {local_path} → s3://{self.settings.s3_bucket_name}/{key}"
         )
@@ -40,6 +47,7 @@ class S3ObjectStorage:
             await s3.upload_file(local_path, self.settings.s3_bucket_name, key)
 
     async def list_keys(self, prefix: str) -> list[str]:
+        """List all object keys in the bucket matching the given prefix."""
         async with self._session.client("s3", **self._client_kwargs()) as s3:
             resp = await s3.list_objects_v2(
                 Bucket=self.settings.s3_bucket_name, Prefix=prefix
@@ -47,6 +55,7 @@ class S3ObjectStorage:
             return [obj["Key"] for obj in resp.get("Contents", [])]
 
     async def delete(self, key: str) -> None:
+        """Delete the object identified by key from S3."""
         self.logger.info(f"Deleting s3://{self.settings.s3_bucket_name}/{key}")
         async with self._session.client("s3", **self._client_kwargs()) as s3:
             await s3.delete_object(Bucket=self.settings.s3_bucket_name, Key=key)
@@ -68,6 +77,10 @@ class S3ObjectStorage:
                 )
                 return False
             raise
-        except (EndpointConnectionError, BotoCoreError, Exception) as e:
+        except (  # pylint: disable=broad-exception-caught
+            EndpointConnectionError,
+            BotoCoreError,
+            Exception,
+        ) as e:
             self.logger.warning(f"S3 unreachable, skipping restore for {key}: {e}")
             return False

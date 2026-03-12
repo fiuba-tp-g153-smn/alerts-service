@@ -1,3 +1,5 @@
+"""Scheduler setup and layer-ensuring logic for the alerts service."""
+
 import asyncio
 import glob as _glob
 import os
@@ -22,6 +24,7 @@ SIMPLIFIED_FILES = {
 
 
 def _latest_local_key(data_dir: str, stem: str) -> str | None:
+    """Return the filename of the newest versioned local file for the given stem, or None."""
     matches = sorted(_glob.glob(os.path.join(data_dir, f"{stem}_????????.geojson")))
     return os.path.basename(matches[-1]) if matches else None
 
@@ -39,7 +42,7 @@ async def _ensure_layers(settings, logger: Logger, storage: S3ObjectStorage) -> 
         return sorted(keys)[-1] if keys else None
 
     async def _get_raw(fname: str) -> None:
-        stem, ext = os.path.splitext(fname)
+        stem, _ = os.path.splitext(fname)
         if _latest_local_key(data_dir, stem):
             logger.info(f"{fname}: already present locally, skipping.")
             return
@@ -58,7 +61,7 @@ async def _ensure_layers(settings, logger: Logger, storage: S3ObjectStorage) -> 
             await storage.upload(local, versioned)
 
     async def _get_simplified(fname: str, source: str) -> None:
-        stem, ext = os.path.splitext(fname)
+        stem, _ = os.path.splitext(fname)
         if _latest_local_key(data_dir, stem):
             logger.info(f"{fname}: already present locally, skipping.")
             return
@@ -70,7 +73,9 @@ async def _ensure_layers(settings, logger: Logger, storage: S3ObjectStorage) -> 
                     return
         logger.info(f"{fname}: not in S3, will generate from {source}.")
         src_stem = os.path.splitext(source)[0]
-        src = os.path.join(data_dir, _latest_local_key(data_dir, src_stem))
+        src_key = _latest_local_key(data_dir, src_stem)
+        assert src_key is not None, f"Raw layer {src_stem} not found after download"
+        src = os.path.join(data_dir, src_key)
         versioned = _versioned_key(fname)
         local = os.path.join(data_dir, versioned)
         await _simplify(src, local, tolerance, logger)
@@ -89,6 +94,7 @@ async def _ensure_layers(settings, logger: Logger, storage: S3ObjectStorage) -> 
 
 
 async def setup_scheduler(settings, logger: Logger) -> AsyncIOScheduler:
+    """Configure and return an AsyncIOScheduler with the layer refresh cron job."""
     data_dir = settings.data_dir
     os.makedirs(data_dir, exist_ok=True)
 

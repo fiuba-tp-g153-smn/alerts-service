@@ -1,3 +1,5 @@
+"""FastAPI application entry point and lifespan management."""
+
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -9,7 +11,8 @@ from scheduler import setup_scheduler
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(_app: FastAPI):
+    """Manage application startup (scheduler init) and shutdown lifecycle."""
     logger.info("Application startup: initializing scheduler ...")
 
     scheduler = await setup_scheduler(settings, logger)

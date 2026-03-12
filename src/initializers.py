@@ -1,3 +1,5 @@
+"""Logger factory — plain-text format for development, NewRelic JSON for production."""
+
 # Standard library imports
 import logging
 from logging import Logger
@@ -13,6 +15,7 @@ APP_ENV_DEVELOPMENT: str = "development"
 
 
 def init_logger(settings: Settings) -> Logger:
+    """Create and return a configured logger based on the current environment."""
     handler = logging.StreamHandler()
     if settings.app_env == APP_ENV_DEVELOPMENT:
         formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s")

@@ -1,3 +1,5 @@
+"""OpenAPI response schema definitions for all endpoints."""
+
 from typing import Any, Dict
 
 # General endpoints

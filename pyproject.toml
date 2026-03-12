@@ -44,6 +44,9 @@ pythonpath = ["src"]
 addopts = "--disable-socket --allow-hosts=127.0.0.1"
 testpaths = ["tests/application", "tests/unit"]
 
+[tool.mypy]
+ignore_missing_imports = true
+
 [tool.pylint.main]
 init-hook = "import sys; sys.path.insert(0, 'src')"
 

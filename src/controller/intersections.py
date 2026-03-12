@@ -1,3 +1,5 @@
+"""Geo intersection API endpoints."""
+
 import time
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -38,11 +40,11 @@ def intersect_country(
         logger.info(f"intersect_country (simplified={use_simplified}): {elapsed:.3f}s")
         return JSONResponse(content=result)
     except FileNotFoundError as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
 
 @router.post(
@@ -76,11 +78,11 @@ def intersect_departments(
         )
         return {"departments": features}
     except FileNotFoundError as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
 
 @router.get(

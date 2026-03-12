@@ -1,3 +1,5 @@
+"""Service that downloads, simplifies, and uploads geographic layer files."""
+
 import asyncio
 import os
 import time
@@ -19,13 +21,17 @@ GEOJSON_FILES = [
 ]
 
 
-class LayerRefreshService:
+class LayerRefreshService:  # pylint: disable=too-few-public-methods
+    """Orchestrates a full layer refresh: download from IGN, simplify, and sync to S3."""
+
     def __init__(self, settings: "Settings", storage: IObjectStorage, logger: Logger):
+        """Initialise with application settings, an object storage client, and a logger."""
         self.settings = settings
         self.storage = storage
         self.logger = logger
 
     async def run(self) -> LayerRefreshResult:
+        """Execute the full refresh cycle and return a result with status and timing."""
         start = time.monotonic()
         data_dir = self.settings.data_dir
         os.makedirs(data_dir, exist_ok=True)
@@ -77,7 +83,7 @@ class LayerRefreshService:
                 error=None,
             )
 
-        except Exception as exc:
+        except Exception as exc:  # pylint: disable=broad-exception-caught
             duration = time.monotonic() - start
             self.logger.error(f"Layer refresh failed after {duration:.1f}s: {exc}")
             return LayerRefreshResult(

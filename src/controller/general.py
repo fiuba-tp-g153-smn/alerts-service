@@ -1,4 +1,6 @@
-from fastapi import APIRouter, Depends, Query, status
+"""General API endpoints (root and health check)."""
+
+from fastapi import APIRouter, Depends, status
 
 from container import get_logger
 from controller.responses import HEALTH_RESPONSES, ROOT_RESPONSES

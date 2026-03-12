@@ -1,3 +1,5 @@
+"""Application configuration via environment variables."""
+
 import os
 
 from dotenv import load_dotenv
@@ -5,11 +7,8 @@ from dotenv import load_dotenv
 load_dotenv()
 
 
-class Settings:
-    """
-    Application settings management.
-    Handles configuration loading from environment variables.
-    """
+class Settings:  # pylint: disable=too-many-instance-attributes,too-few-public-methods
+    """Application settings loaded from environment variables."""
 
     log_level: str = ""
     app_env: str = ""
@@ -70,4 +69,5 @@ class Settings:
 
     @staticmethod
     def get_settings() -> "Settings":
+        """Instantiate and return a Settings object from the environment."""
         return Settings()
