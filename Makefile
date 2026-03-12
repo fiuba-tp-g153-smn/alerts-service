@@ -1,13 +1,9 @@
 # Makefile for managing the Alerts Service application
 
 # Declare phony targets to avoid conflicts with files of the same name
-.PHONY: install dev local test stop logs clean
+.PHONY: up stop clean prod test test-api
 
-install:
-	pip install poetry
-	poetry install
-
-dev:
+up:
 # Start the development environment using Docker Compose
 # - Uses Dockerfile.dev with live code reloading
 # - Mounts source code, scripts, and data directories
@@ -15,17 +11,10 @@ dev:
 # - Access: http://localhost:8080/docs
 	docker compose -f docker-compose-dev.yaml up --build
 
-dev-detached:
-# Start development environment in background
-	docker compose -f docker-compose-dev.yaml up -d --build
-
-stop:
+down:
 # Stop all running containers
+	docker compose down
 	docker compose -f docker-compose-dev.yaml down
-
-logs:
-# Follow logs from the development container
-	docker compose -f docker-compose-dev.yaml logs -f
 
 clean:
 # Stop containers and remove volumes
@@ -34,13 +23,6 @@ clean:
 prod:
 # Start production environment
 	docker compose up -d --build
-
-prod-stop:
-# Stop production environment
-	docker compose down
-
-local:
-	cd ./src && uvicorn main:app --host 0.0.0.0 --port 8080 --reload
 
 test:
 # Build the test Docker image and run the tests

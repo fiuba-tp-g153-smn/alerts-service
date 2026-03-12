@@ -63,6 +63,7 @@ piplock.txt
 junit_report.xml
 .coverage
 .pytest_cache
+reports/
 
 data/
 # Test results (keep test script and input polygon)

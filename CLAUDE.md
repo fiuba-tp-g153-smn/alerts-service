@@ -94,7 +94,7 @@ Copy `.env.example` to `.env`. Key variables:
 
 ## Tech Stack
 
-- **Python 3.13.8**, managed via **Poetry**
+- **Python 3.13.12**, managed via **Poetry**
 - **FastAPI** + **Uvicorn** for the web layer
 - **GeoPandas**, **Shapely**, **Fiona**, **PyProj** for geospatial operations
 - **NewRelic** APM in production
