@@ -21,8 +21,8 @@ FROM python:3.13.12-slim-trixie AS runner
 
 WORKDIR /app
 
-# Install cron and curl for healthcheck
-RUN apt-get update && apt-get install -y --no-install-recommends cron curl && rm -rf /var/lib/apt/lists/*
+# Install cron
+RUN apt-get update && apt-get install -y --no-install-recommends cron && rm -rf /var/lib/apt/lists/*
 
 # Use python implementation of protobuf instead of binary
 ENV PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION=python
@@ -54,4 +54,6 @@ ENTRYPOINT ["/entrypoint.sh"]
 # - "main:app" : entrypoint -> file main.py, ASGI app instance "app"
 # - host=0.0.0.0 : bind to all network interfaces (needed in containers)
 # - port=8080 : matches EXPOSE above
+HEALTHCHECK --interval=10s --timeout=10s --retries=5 CMD python -c 'import urllib.request; urllib.request.urlopen("http://localhost:8080/health")'
+
 CMD ["uvicorn", "main:app", "--host=0.0.0.0", "--port", "8080"]

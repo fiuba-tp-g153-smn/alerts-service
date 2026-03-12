@@ -36,8 +36,9 @@ services:
       - OGR_GEOJSON_MAX_OBJ_SIZE=0
       - SIMPLIFY_TOLERANCE=${SIMPLIFY_TOLERANCE}
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')"]
       interval: 10s
-      timeout: 5s
-      retries: 3
-      start_period: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 15s
+      start_interval: 1s
