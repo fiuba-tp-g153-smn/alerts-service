@@ -36,10 +36,14 @@ class FileSystemGeoLayerRepository(
         self.data_dir = data_dir
         self.logger = logger
 
+    def get_layer_path(self, layer: LayerType, simplified: bool) -> str:
+        """Return the filesystem path for the given layer without loading it."""
+        stem = _LAYER_STEMS[(layer, simplified)]
+        return _versioned_stem(self.data_dir, stem)
+
     def get_layer(self, layer: LayerType, simplified: bool) -> gpd.GeoDataFrame:
         """Load and return the GeoDataFrame for the requested layer and resolution."""
-        stem = _LAYER_STEMS[(layer, simplified)]
-        path = _versioned_stem(self.data_dir, stem)
+        path = self.get_layer_path(layer, simplified)
 
         t0 = time.time()
         self.logger.info(f"Loading GeoDataFrame: {path}")
