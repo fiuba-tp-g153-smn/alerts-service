@@ -1,9 +1,9 @@
 """Subprocess worker for full-resolution GeoDataFrame intersection.
 
-Reads a JSON payload from stdin:
-  {"task": "country" | "departments", "geometry_wkb_hex": "...", "layer_path": "..."}
+Reads a JSON array of requests from stdin:
+  [{"id": "...", "task": "country" | "departments", "geometry_wkb_hex": "...", "layer_path": "..."}]
 
-Writes the JSON result to stdout and exits. The OS reclaims the entire process
+Writes a JSON result dictionary to stdout and exits. The OS reclaims the entire process
 address space on exit — GEOS heap and all glibc arenas — unconditionally.
 """
 
@@ -53,22 +53,46 @@ def _intersect_departments(gdf, geom):
 
 
 def main():
-    payload = json.load(sys.stdin)
-    task = payload["task"]
-    geom = shapely_wkb.loads(payload["geometry_wkb_hex"], hex=True)
-    layer_path = payload["layer_path"]
-
-    gdf = gpd.read_file(layer_path)
-
-    if task == "country":
-        result = _intersect_country(gdf, geom)
-        json.dump(result, sys.stdout, cls=_NumpyEncoder)
-    elif task == "departments":
-        features = _intersect_departments(gdf, geom)
-        json.dump({"features": features}, sys.stdout, cls=_NumpyEncoder)
-    else:
-        print(f"Unknown task: {task}", file=sys.stderr)
+    try:
+        payload = json.load(sys.stdin)
+    except json.JSONDecodeError:
+        print("Invalid JSON input", file=sys.stderr)
         sys.exit(1)
+
+    if not isinstance(payload, list):
+        print("Expected a JSON array of requests", file=sys.stderr)
+        sys.exit(1)
+
+    loaded_gdfs = {}
+    output = {"results": {}, "errors": {}}
+
+    for req in payload:
+        req_id = req.get("id")
+        if not req_id:
+            continue
+
+        try:
+            task = req["task"]
+            geom = shapely_wkb.loads(req["geometry_wkb_hex"], hex=True)
+            layer_path = req["layer_path"]
+
+            if layer_path not in loaded_gdfs:
+                loaded_gdfs[layer_path] = gpd.read_file(layer_path)
+
+            gdf = loaded_gdfs[layer_path]
+
+            if task == "country":
+                result = _intersect_country(gdf, geom)
+                output["results"][req_id] = result
+            elif task == "departments":
+                features = _intersect_departments(gdf, geom)
+                output["results"][req_id] = {"features": features}
+            else:
+                output["errors"][req_id] = f"Unknown task: {task}"
+        except Exception as e:
+            output["errors"][req_id] = str(e)
+
+    json.dump(output, sys.stdout, cls=_NumpyEncoder)
 
 
 if __name__ == "__main__":

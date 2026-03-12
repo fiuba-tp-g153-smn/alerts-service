@@ -2,8 +2,6 @@
 
 import json
 import os
-import subprocess
-import sys
 import time
 from logging import Logger
 
@@ -12,6 +10,7 @@ from shapely.geometry import shape
 
 from domain.models import LayerType
 from ports.geo_repository import IGeoLayerRepository
+from services.fullres_batch_manager import FullresBatchManager
 
 _WORKER_PATH = os.path.abspath(
     os.path.join(os.path.dirname(__file__), "..", "fullres_worker.py")
@@ -21,30 +20,21 @@ _WORKER_PATH = os.path.abspath(
 class GeoIntersectionService:
     """Computes polygon intersections with country and department layers."""
 
-    def __init__(self, repo: IGeoLayerRepository, logger: Logger):
-        """Initialise with a geo layer repository and a logger."""
+    def __init__(
+        self,
+        repo: IGeoLayerRepository,
+        logger: Logger,
+        batch_manager: FullresBatchManager,
+    ):
+        """Initialise with a geo layer repository, a logger, and a batch manager."""
         self.repo = repo
         self.logger = logger
+        self.batch_manager = batch_manager
 
     def _run_fullres_subprocess(self, task: str, geom, layer_path: str) -> dict:
         """Run the intersection in an isolated subprocess to prevent glibc arena bloat."""
-        payload = {
-            "task": task,
-            "geometry_wkb_hex": shapely_wkb.dumps(geom, hex=True),
-            "layer_path": layer_path,
-        }
-        result = subprocess.run(
-            [sys.executable, _WORKER_PATH],
-            input=json.dumps(payload),
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        if result.returncode != 0:
-            raise RuntimeError(
-                f"fullres_worker failed (exit {result.returncode}): {result.stderr}"
-            )
-        return json.loads(result.stdout)
+        geometry_wkb_hex = shapely_wkb.dumps(geom, hex=True)
+        return self.batch_manager.submit(task, geometry_wkb_hex, layer_path)
 
     def intersect_country(self, geometry_dict: dict, simplified: bool) -> dict:
         """Return a GeoJSON FeatureCollection of the intersection with Argentina."""

@@ -19,8 +19,13 @@ def mock_repo():
 
 
 @pytest.fixture
-def service(mock_repo, mock_logger):
-    return GeoIntersectionService(mock_repo, mock_logger)
+def mock_batch_manager():
+    return MagicMock()
+
+
+@pytest.fixture
+def service(mock_repo, mock_logger, mock_batch_manager):
+    return GeoIntersectionService(mock_repo, mock_logger, mock_batch_manager)
 
 
 @pytest.fixture
