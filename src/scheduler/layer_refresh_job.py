@@ -33,7 +33,9 @@ async def _download(url: str, out_path: str, logger: Logger) -> None:
     logger.info(f"Saved {out_path}")
 
 
-async def _simplify(in_path: str, out_path: str, tolerance: float, logger: Logger) -> None:
+async def _simplify(
+    in_path: str, out_path: str, tolerance: float, logger: Logger
+) -> None:
     logger.info(f"Simplifying {in_path} (tolerance={tolerance}) ...")
 
     def _run():
@@ -89,9 +91,19 @@ async def run_layer_refresh(settings: "Settings", logger: Logger) -> Dict[str, A
 
         duration = time.monotonic() - start
         logger.info(f"Layer refresh completed in {duration:.1f}s")
-        return {"status": "success", "files": updated_files, "duration_seconds": duration, "error": None}
+        return {
+            "status": "success",
+            "files": updated_files,
+            "duration_seconds": duration,
+            "error": None,
+        }
 
     except Exception as exc:
         duration = time.monotonic() - start
         logger.error(f"Layer refresh failed after {duration:.1f}s: {exc}")
-        return {"status": "failed", "files": [], "duration_seconds": duration, "error": str(exc)}
+        return {
+            "status": "failed",
+            "files": [],
+            "duration_seconds": duration,
+            "error": str(exc),
+        }

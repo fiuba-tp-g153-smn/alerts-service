@@ -49,14 +49,24 @@ class Settings:
         self.s3_access_key = os.getenv("S3_ACCESS_KEY", self.s3_access_key)
         self.s3_secret_key = os.getenv("S3_SECRET_KEY", self.s3_secret_key)
         self.s3_bucket_name = os.getenv("S3_BUCKET_NAME", self.s3_bucket_name)
-        self.s3_secure = os.getenv("S3_SECURE", str(self.s3_secure)).lower() not in ("false", "0", "no")
+        self.s3_secure = os.getenv("S3_SECURE", str(self.s3_secure)).lower() not in (
+            "false",
+            "0",
+            "no",
+        )
 
         self.layer_update_cron = os.getenv("LAYER_UPDATE_CRON", self.layer_update_cron)
 
         self.data_dir = os.getenv("DATA_DIR", self.data_dir)
-        self.simplify_tolerance = float(os.getenv("SIMPLIFY_TOLERANCE", str(self.simplify_tolerance)))
-        self.country_geojson_url = os.getenv("COUNTRY_GEOJSON_URL", self.country_geojson_url)
-        self.departments_geojson_url = os.getenv("DEPARTMENTS_GEOJSON_URL", self.departments_geojson_url)
+        self.simplify_tolerance = float(
+            os.getenv("SIMPLIFY_TOLERANCE", str(self.simplify_tolerance))
+        )
+        self.country_geojson_url = os.getenv(
+            "COUNTRY_GEOJSON_URL", self.country_geojson_url
+        )
+        self.departments_geojson_url = os.getenv(
+            "DEPARTMENTS_GEOJSON_URL", self.departments_geojson_url
+        )
 
     @staticmethod
     def get_settings() -> "Settings":

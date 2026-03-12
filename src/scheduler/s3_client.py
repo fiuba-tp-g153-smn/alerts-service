@@ -29,7 +29,9 @@ class S3Client:
         return kwargs
 
     async def upload_file(self, local_path: str, s3_key: str) -> None:
-        self.logger.info(f"Uploading {local_path} → s3://{self.settings.s3_bucket_name}/{s3_key}")
+        self.logger.info(
+            f"Uploading {local_path} → s3://{self.settings.s3_bucket_name}/{s3_key}"
+        )
         async with self._session.client("s3", **self._client_kwargs()) as s3:
             await s3.upload_file(local_path, self.settings.s3_bucket_name, s3_key)
 
@@ -39,7 +41,9 @@ class S3Client:
             async with self._session.client("s3", **self._client_kwargs()) as s3:
                 os.makedirs(os.path.dirname(local_path), exist_ok=True)
                 await s3.download_file(self.settings.s3_bucket_name, s3_key, local_path)
-            self.logger.info(f"Restored s3://{self.settings.s3_bucket_name}/{s3_key} → {local_path}")
+            self.logger.info(
+                f"Restored s3://{self.settings.s3_bucket_name}/{s3_key} → {local_path}"
+            )
             return True
         except ClientError as e:
             if e.response["Error"]["Code"] in ("404", "NoSuchKey"):

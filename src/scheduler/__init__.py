@@ -15,7 +15,9 @@ async def setup_scheduler(settings, logger: Logger) -> AsyncIOScheduler:
 
     # Try to restore geojson files from S3 if missing locally
     s3 = S3Client(settings, logger)
-    missing = [f for f in GEOJSON_FILES if not os.path.exists(os.path.join(data_dir, f))]
+    missing = [
+        f for f in GEOJSON_FILES if not os.path.exists(os.path.join(data_dir, f))
+    ]
 
     if missing:
         if settings.s3_bucket_name:
@@ -25,7 +27,11 @@ async def setup_scheduler(settings, logger: Logger) -> AsyncIOScheduler:
                 ok = await s3.download_file(fname, os.path.join(data_dir, fname))
                 if ok:
                     restored.append(fname)
-            still_missing = [f for f in GEOJSON_FILES if not os.path.exists(os.path.join(data_dir, f))]
+            still_missing = [
+                f
+                for f in GEOJSON_FILES
+                if not os.path.exists(os.path.join(data_dir, f))
+            ]
         else:
             still_missing = missing
 
