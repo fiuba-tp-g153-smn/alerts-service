@@ -35,6 +35,8 @@ services:
       - APP_ENV=${APP_ENV}
       - OGR_GEOJSON_MAX_OBJ_SIZE=0
       - SIMPLIFY_TOLERANCE=${SIMPLIFY_TOLERANCE}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')"]
       interval: 10s

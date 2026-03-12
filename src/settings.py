@@ -22,7 +22,7 @@ class Settings:
     s3_secure: bool = True
 
     # Scheduler
-    layer_update_cron: str = "0 3 1 * *"
+    layer_update_cron: str = "0 3 * * 0"
 
     # Geospatial
     data_dir: str = "/app/data"

@@ -1,13 +1,15 @@
 # Standard library imports
+import glob
 import json
 import os
 import time
 from typing import Any, Dict
 
+import geopandas as gpd
+
 # Third-party imports
 from fastapi import APIRouter, HTTPException, Query, status
 from fastapi.responses import JSONResponse
-import geopandas as gpd
 from shapely.geometry import shape
 
 # Local imports
@@ -17,12 +19,14 @@ from scheduler import get_history_tracker
 
 router = APIRouter()
 
-# Constants for geo data paths
 DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "data")
-COUNTRY_FULL_PATH = os.path.join(DATA_DIR, "pais.geojson")
-COUNTRY_SIMPLE_PATH = os.path.join(DATA_DIR, "pais_simple.geojson")
-DEPTOS_FULL_PATH = os.path.join(DATA_DIR, "departamentos.geojson")
-DEPTOS_SIMPLE_PATH = os.path.join(DATA_DIR, "departamentos_simple.geojson")
+
+
+def _latest_local(stem: str) -> str:
+    matches = sorted(glob.glob(os.path.join(DATA_DIR, f"{stem}_????????.geojson")))
+    if not matches:
+        raise HTTPException(status_code=500, detail=f"No data file found for {stem}")
+    return matches[-1]
 
 
 # Helper functions
@@ -51,7 +55,11 @@ def load_gdf(path: str) -> gpd.GeoDataFrame:
     """Load a GeoDataFrame from a file, raising HTTP 500 if missing."""
     if not os.path.exists(path):
         raise HTTPException(status_code=500, detail=f"Missing data file: {path}")
-    return gpd.read_file(path)
+    t0 = time.time()
+    logger.info(f"Loading GeoDataFrame: {path}")
+    gdf = gpd.read_file(path)
+    logger.info(f"Loaded {path} in {time.time()-t0:.3f}s ({len(gdf)} features)")
+    return gdf
 
 
 # General endpoints
@@ -79,6 +87,7 @@ def root():
 )
 def health_check():
     """Perform a health check of the service."""
+    logger.info("Health check")
     return {"status": "running"}
 
 
@@ -105,11 +114,23 @@ def intersect_country(
     try:
         geometry = extract_geometry(geojson)
         input_geom = shape(geometry)
-        country_path = COUNTRY_SIMPLE_PATH if use_simplified else COUNTRY_FULL_PATH
+        country_path = (
+            _latest_local("pais_simple") if use_simplified else _latest_local("pais")
+        )
+
+        t0 = time.time()
         country_gdf = load_gdf(country_path)
+        logger.info(f"intersect_country: load={time.time()-t0:.3f}s")
+
+        t0 = time.time()
         intersection = country_gdf[country_gdf.intersects(input_geom)]
         intersection = intersection.intersection(input_geom)
+        logger.info(f"intersect_country: intersect={time.time()-t0:.3f}s")
+
+        t0 = time.time()
         result = json.loads(intersection.to_json())
+        logger.info(f"intersect_country: serialize={time.time()-t0:.3f}s")
+
         elapsed = time.time() - start_time
         logger.info(f"intersect_country (simplified={use_simplified}): {elapsed:.3f}s")
         return JSONResponse(content=result)
@@ -141,12 +162,23 @@ def intersect_departments(
     try:
         geometry = extract_geometry(geojson)
         input_geom = shape(geometry)
-        deptos_path = DEPTOS_SIMPLE_PATH if use_simplified else DEPTOS_FULL_PATH
+        deptos_path = (
+            _latest_local("departamentos_simple")
+            if use_simplified
+            else _latest_local("departamentos")
+        )
+
+        t0 = time.time()
         deptos_gdf = load_gdf(deptos_path)
+        logger.info(f"intersect_departments: load={time.time()-t0:.3f}s")
+
+        t0 = time.time()
         mask = deptos_gdf.intersects(input_geom)
         intersecting = deptos_gdf[mask].copy()
         intersecting["intersection"] = intersecting["geometry"].intersection(input_geom)
+        logger.info(f"intersect_departments: intersect={time.time()-t0:.3f}s")
 
+        t0 = time.time()
         features = []
         for _, row in intersecting.iterrows():
             features.append(
@@ -160,6 +192,8 @@ def intersect_departments(
                     "intersection": row["intersection"].__geo_interface__,
                 }
             )
+        logger.info(f"intersect_departments: serialize={time.time()-t0:.3f}s")
+
         elapsed = time.time() - start_time
         logger.info(
             f"intersect_departments (simplified={use_simplified}): {elapsed:.3f}s"
@@ -177,5 +211,6 @@ def intersect_departments(
 )
 def layer_refresh_history(limit: int = Query(20, ge=1, le=100)):
     """Return the most recent layer refresh job run records."""
+    logger.info(f"Layer refresh history requested (limit={limit})")
     tracker = get_history_tracker(settings)
     return {"runs": tracker.get_recent(limit)}

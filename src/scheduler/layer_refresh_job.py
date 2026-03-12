@@ -1,6 +1,7 @@
 import asyncio
 import os
 import time
+from datetime import date
 from logging import Logger
 from typing import TYPE_CHECKING, Any, Dict, List
 
@@ -16,10 +17,15 @@ os.environ.setdefault("OGR_GEOJSON_MAX_OBJ_SIZE", "0")
 
 GEOJSON_FILES = [
     "pais.geojson",
-    "pais_simple.geojson",
     "departamentos.geojson",
+    "pais_simple.geojson",
     "departamentos_simple.geojson",
 ]
+
+
+def _versioned_key(fname: str) -> str:
+    stem, ext = os.path.splitext(fname)
+    return f"{stem}_{date.today().strftime('%Y%m%d')}{ext}"
 
 
 async def _download(url: str, out_path: str, logger: Logger) -> None:
@@ -30,7 +36,8 @@ async def _download(url: str, out_path: str, logger: Logger) -> None:
             content = await resp.read()
     with open(out_path, "wb") as f:
         f.write(content)
-    logger.info(f"Saved {out_path}")
+    size_mb = os.path.getsize(out_path) / 1_048_576
+    logger.info(f"Saved {out_path} ({size_mb:.1f} MB)")
 
 
 async def _simplify(
@@ -64,10 +71,12 @@ async def run_layer_refresh(settings: "Settings", logger: Logger) -> Dict[str, A
         "https://wms.ign.gob.ar/geoserver/ows?service=WFS&version=1.0.0&request=GetFeature&typeName=ign:departamento&outputFormat=application/json",
     )
 
-    country_path = os.path.join(data_dir, "pais.geojson")
-    country_simple_path = os.path.join(data_dir, "pais_simple.geojson")
-    deptos_path = os.path.join(data_dir, "departamentos.geojson")
-    deptos_simple_path = os.path.join(data_dir, "departamentos_simple.geojson")
+    country_path = os.path.join(data_dir, _versioned_key("pais.geojson"))
+    country_simple_path = os.path.join(data_dir, _versioned_key("pais_simple.geojson"))
+    deptos_path = os.path.join(data_dir, _versioned_key("departamentos.geojson"))
+    deptos_simple_path = os.path.join(
+        data_dir, _versioned_key("departamentos_simple.geojson")
+    )
 
     try:
         logger.info("Starting layer refresh: downloading from IGN ...")
@@ -82,12 +91,18 @@ async def run_layer_refresh(settings: "Settings", logger: Logger) -> Dict[str, A
             _simplify(deptos_path, deptos_simple_path, tolerance, logger),
         )
 
+        logger.info("Uploading layers to S3 ...")
         s3 = S3Client(settings, logger)
         updated_files: List[str] = []
         for fname in GEOJSON_FILES:
-            local = os.path.join(data_dir, fname)
-            await s3.upload_file(local, fname)
-            updated_files.append(fname)
+            local = os.path.join(data_dir, _versioned_key(fname))
+            stem, ext = os.path.splitext(fname)
+            old_keys = await s3.list_objects(f"{stem}_")
+            for key in old_keys:
+                await s3.delete_file(key)
+            new_key = _versioned_key(fname)
+            await s3.upload_file(local, new_key)
+            updated_files.append(new_key)
 
         duration = time.monotonic() - start
         logger.info(f"Layer refresh completed in {duration:.1f}s")
