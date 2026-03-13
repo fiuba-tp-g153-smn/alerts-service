@@ -23,9 +23,6 @@ async def lifespan(_app: FastAPI):
     geo_repo = get_geo_repo()
     geo_repo.preload()
 
-    logger.info("Application startup: ensuring full-res FlatGeobuf layers ...")
-    await geo_repo.ensure_fgb_files()
-
     logger.info("Application startup complete.")
 
     yield

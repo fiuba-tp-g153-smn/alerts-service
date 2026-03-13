@@ -35,15 +35,23 @@ async def intersect_country(
     start_time = time.time()
     try:
         geometry = geojson.extract_geometry()
+        logger.info(
+            f"intersect_country: processing (simplified={use_simplified}, type={geometry.get('type')})"
+        )
         result = await service.intersect_country(geometry, use_simplified)
         elapsed = time.time() - start_time
-        logger.info(f"intersect_country (simplified={use_simplified}): {elapsed:.3f}s")
+        logger.info(
+            f"intersect_country: done (simplified={use_simplified}) in {elapsed:.3f}s"
+        )
         return JSONResponse(content=result)
     except FileNotFoundError as e:
+        logger.error(f"intersect_country: layer file not found: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
     except ValueError as e:
+        logger.warning(f"intersect_country: bad request: {e}")
         raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
+        logger.error(f"intersect_country: unexpected error: {e}", exc_info=True)
         raise HTTPException(status_code=400, detail=str(e)) from e
 
 
@@ -71,17 +79,23 @@ async def intersect_departments(
     start_time = time.time()
     try:
         geometry = geojson.extract_geometry()
+        logger.info(
+            f"intersect_departments: processing (simplified={use_simplified}, type={geometry.get('type')})"
+        )
         features = await service.intersect_departments(geometry, use_simplified)
         elapsed = time.time() - start_time
         logger.info(
-            f"intersect_departments (simplified={use_simplified}): {elapsed:.3f}s"
+            f"intersect_departments: done (simplified={use_simplified}) in {elapsed:.3f}s, {len(features)} departments"
         )
         return {"departments": features}
     except FileNotFoundError as e:
+        logger.error(f"intersect_departments: layer file not found: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
     except ValueError as e:
+        logger.warning(f"intersect_departments: bad request: {e}")
         raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
+        logger.error(f"intersect_departments: unexpected error: {e}", exc_info=True)
         raise HTTPException(status_code=400, detail=str(e)) from e
 
 

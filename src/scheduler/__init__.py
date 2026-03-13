@@ -1,6 +1,5 @@
 """Scheduler setup and layer-ensuring logic for the alerts service."""
 
-import asyncio
 import glob as _glob
 import os
 from logging import Logger
@@ -10,87 +9,114 @@ from apscheduler.triggers.cron import CronTrigger
 
 from adapters.s3_storage import S3ObjectStorage
 from adapters.sqlite_history import SqliteHistoryRepository
-from scheduler.layer_refresh_job import _download, _simplify, _versioned_key
+from scheduler.layer_refresh_job import (
+    _convert_to_fgb,
+    _download,
+    _simplify,
+    _versioned_key,
+)
 from services.layer_refresh_service import LayerRefreshService
 
-RAW_FILES = {
-    "pais.geojson": "country_geojson_url",
-    "departamentos.geojson": "departments_geojson_url",
-}
-SIMPLIFIED_FILES = {
-    "pais_simple.geojson": "pais.geojson",
-    "departamentos_simple.geojson": "departamentos.geojson",
-}
+_LAYERS = [
+    {
+        "simplified_stem": "pais_simple",
+        "fgb_stem": "pais",
+        "url_attr": "country_geojson_url",
+        "raw_tmp": "pais_raw_tmp.geojson",
+    },
+    {
+        "simplified_stem": "departamentos_simple",
+        "fgb_stem": "departamentos",
+        "url_attr": "departments_geojson_url",
+        "raw_tmp": "departamentos_raw_tmp.geojson",
+    },
+]
 
 
-def _latest_local_key(data_dir: str, stem: str) -> str | None:
-    """Return the filename of the newest versioned local file for the given stem, or None."""
-    matches = sorted(_glob.glob(os.path.join(data_dir, f"{stem}_????????.geojson")))
-    return os.path.basename(matches[-1]) if matches else None
+def _extract_date(key: str) -> str | None:
+    """Return the 8-digit date suffix from a versioned filename, or None."""
+    stem_part = os.path.splitext(os.path.basename(key))[0]
+    parts = stem_part.split("_")
+    if parts and len(parts[-1]) == 8 and parts[-1].isdigit():
+        return parts[-1]
+    return None
 
 
 async def _ensure_layers(settings, logger: Logger, storage: S3ObjectStorage) -> None:
-    """
-    For each geojson file: if missing locally, try S3 (latest versioned key).
-    If still missing: download raw files from IGN, generate simplified files locally.
-    """
+    """Ensure all geo layers are present locally and in S3 via bidirectional date-stamp reconciliation."""
     data_dir = settings.data_dir
     tolerance = float(getattr(settings, "simplify_tolerance", 0.01))
 
-    async def _latest_s3_key(prefix: str) -> str | None:
-        keys = await storage.list_keys(prefix)
-        return sorted(keys)[-1] if keys else None
+    def _local_date(stem: str, ext: str) -> str | None:
+        matches = sorted(_glob.glob(os.path.join(data_dir, f"{stem}_????????{ext}")))
+        return _extract_date(matches[-1]) if matches else None
 
-    async def _get_raw(fname: str) -> None:
-        stem, _ = os.path.splitext(fname)
-        if _latest_local_key(data_dir, stem):
-            logger.info(f"{fname}: already present locally, skipping.")
-            return
+    async def _s3_date(stem: str, ext: str) -> str | None:
+        if not settings.s3_bucket_name:
+            return None
+        keys = [k for k in await storage.list_keys(f"{stem}_") if k.endswith(ext)]
+        return _extract_date(sorted(keys)[-1]) if keys else None
+
+    async def _reconcile_file(stem: str, ext: str) -> bool:
+        """Ensure the canonical version is present locally and in S3. Returns False if re-generation is needed."""
+        local_date = _local_date(stem, ext)
+        s3_date = await _s3_date(stem, ext)
+
+        if local_date is None and s3_date is None:
+            return False
+
+        canonical = max(d for d in [local_date, s3_date] if d is not None)
+        canonical_filename = f"{stem}_{canonical}{ext}"
+        local_path = os.path.join(data_dir, canonical_filename)
+
+        if not os.path.exists(local_path):
+            logger.info(
+                f"{canonical_filename}: missing locally, downloading from S3 ..."
+            )
+            if not await storage.download(canonical_filename, local_path):
+                logger.warning(
+                    f"{canonical_filename}: S3 download failed, will re-generate."
+                )
+                return False
+
+        if settings.s3_bucket_name and s3_date != canonical:
+            logger.info(f"{canonical_filename}: missing from S3, uploading ...")
+            await storage.upload(local_path, canonical_filename)
+
+        logger.info(f"{canonical_filename}: ready.")
+        return True
+
+    for layer in _LAYERS:
+        simplified_ok = await _reconcile_file(layer["simplified_stem"], ".geojson")
+        fgb_ok = await _reconcile_file(layer["fgb_stem"], ".fgb")
+
+        if simplified_ok and fgb_ok:
+            continue
+
+        logger.info(f"Re-generating layer: {layer['fgb_stem']} ...")
+        url = getattr(settings, layer["url_attr"])
+        raw_tmp = os.path.join(data_dir, layer["raw_tmp"])
+        simplified_path = os.path.join(
+            data_dir, _versioned_key(f"{layer['simplified_stem']}.geojson")
+        )
+        fgb_path = os.path.join(data_dir, _versioned_key(f"{layer['fgb_stem']}.fgb"))
+
+        await _download(url, raw_tmp, logger)
+        await _simplify(raw_tmp, simplified_path, tolerance, logger)
+        await _convert_to_fgb(raw_tmp, fgb_path, logger)
+        os.remove(raw_tmp)
+
         if settings.s3_bucket_name:
-            latest = await _latest_s3_key(f"{stem}_")
-            if latest:
-                local = os.path.join(data_dir, os.path.basename(latest))
-                if await storage.download(latest, local):
-                    return
-        logger.info(f"{fname}: not in S3, will download from IGN.")
-        versioned = _versioned_key(fname)
-        local = os.path.join(data_dir, versioned)
-        url = getattr(settings, RAW_FILES[fname])
-        await _download(url, local, logger)
-        if settings.s3_bucket_name:
-            await storage.upload(local, versioned)
+            await storage.upload(
+                simplified_path,
+                _versioned_key(f"{layer['simplified_stem']}.geojson"),
+            )
+            await storage.upload(
+                fgb_path,
+                _versioned_key(f"{layer['fgb_stem']}.fgb"),
+            )
 
-    async def _get_simplified(fname: str, source: str) -> None:
-        stem, _ = os.path.splitext(fname)
-        if _latest_local_key(data_dir, stem):
-            logger.info(f"{fname}: already present locally, skipping.")
-            return
-        if settings.s3_bucket_name:
-            latest = await _latest_s3_key(f"{stem}_")
-            if latest:
-                local = os.path.join(data_dir, os.path.basename(latest))
-                if await storage.download(latest, local):
-                    return
-        logger.info(f"{fname}: not in S3, will generate from {source}.")
-        src_stem = os.path.splitext(source)[0]
-        src_key = _latest_local_key(data_dir, src_stem)
-        assert src_key is not None, f"Raw layer {src_stem} not found after download"
-        src = os.path.join(data_dir, src_key)
-        versioned = _versioned_key(fname)
-        local = os.path.join(data_dir, versioned)
-        await _simplify(src, local, tolerance, logger)
-        if settings.s3_bucket_name:
-            await storage.upload(local, versioned)
-
-    # Download raw files in parallel
-    await asyncio.gather(*[_get_raw(f) for f in RAW_FILES])
-
-    # Generate simplified files in parallel (raw must be ready first)
-    await asyncio.gather(
-        *[_get_simplified(f, src) for f, src in SIMPLIFIED_FILES.items()]
-    )
-
-    logger.info("All geojson layers are ready.")
+    logger.info("All geo layers are ready.")
 
 
 async def setup_scheduler(settings, logger: Logger) -> AsyncIOScheduler:

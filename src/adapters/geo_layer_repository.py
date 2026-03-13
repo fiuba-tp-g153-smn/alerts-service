@@ -10,7 +10,6 @@ import geopandas as gpd
 
 from domain.models import LayerType
 from ports.geo_repository import IGeoLayerRepository
-from scheduler.layer_refresh_job import _convert_to_fgb
 
 _LAYER_STEMS = {
     (LayerType.COUNTRY, True): "pais_simple",
@@ -84,26 +83,3 @@ class FileSystemGeoLayerRepository(IGeoLayerRepository):
         self.get_layer(LayerType.COUNTRY, simplified=True)
         self.get_layer(LayerType.DEPARTMENTS, simplified=True)
         self.logger.info("Simplified geo layers preloaded successfully.")
-
-    async def ensure_fgb_files(self) -> None:
-        """Convert full-res GeoJSON layers to FlatGeobuf if not already present."""
-        for layer in (LayerType.COUNTRY, LayerType.DEPARTMENTS):
-            stem = _FGB_STEMS[layer]
-            existing_fgb = sorted(Path(self.data_dir).glob(f"{stem}_????????.fgb"))
-            if existing_fgb:
-                self.logger.info(
-                    f"FlatGeobuf already exists for {layer}: {existing_fgb[-1].name}"
-                )
-                continue
-
-            try:
-                geojson_path = self.get_layer_path(layer, simplified=False)
-            except FileNotFoundError:
-                self.logger.warning(
-                    f"No full-res GeoJSON found for {layer}, skipping FlatGeobuf conversion"
-                )
-                continue
-
-            fgb_path = str(Path(geojson_path).with_suffix(".fgb"))
-            await _convert_to_fgb(geojson_path, fgb_path, self.logger)
-            self.logger.info(f"FlatGeobuf ready: {fgb_path}")

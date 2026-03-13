@@ -64,15 +64,17 @@ POST /intersect-country or /intersect-departments
 | `src/settings.py` | Config from environment variables |
 | `src/dependencies.py` | Global logger and settings singletons |
 | `src/initializers.py` | Logger factory (dev text vs. production NewRelic format) |
-| `scripts/download_and_simplify_layers.py` | Async script to fetch and simplify IGN layers |
+| `src/scheduler/__init__.py` | Startup layer reconciliation (FS/S3 bidirectional sync) + cron scheduler |
+| `src/services/layer_refresh_service.py` | Full refresh cycle: download → simplify → FGB → upload to S3 |
 
 ### Geographic Data
 
-- Downloaded from IGN WFS at startup via `entrypoint.sh` → `scripts/download_and_simplify_layers.py`
-- Cached in `./data/` volume: `pais.geojson`, `pais_simple.geojson`, `departamentos.geojson`, `departamentos_simple.geojson`
-- Updated monthly via cron job (1st of month, 3 AM)
-- Requires env var `OGR_GEOJSON_MAX_OBJ_SIZE=0` for GDAL to handle large files (100+ MB raw)
-- Simplified files (~1 MB each) are used by default; full-res (~134 MB) available via `?use_simplified=false`
+- On startup, `src/scheduler/__init__.py` reconciles local `./data/` against S3 by date-stamp; downloads missing files from S3 or re-generates from IGN if neither exists
+- Updated monthly via cron job (1st of month, 3 AM) via `layer_refresh_service.py`
+- 4 permanent files per refresh cycle: `pais_simple_YYYYMMDD.geojson`, `departamentos_simple_YYYYMMDD.geojson`, `pais_YYYYMMDD.fgb`, `departamentos_YYYYMMDD.fgb`
+- Raw full-res GeoJSON (~134 MB each) is downloaded to a temp path during refresh and deleted after processing — never persisted
+- Requires env var `OGR_GEOJSON_MAX_OBJ_SIZE=0` for GDAL to handle large files
+- Simplified files (~1 MB each) are used by default; full-res via FlatGeobuf available via `?use_simplified=false`
 
 ### Performance
 

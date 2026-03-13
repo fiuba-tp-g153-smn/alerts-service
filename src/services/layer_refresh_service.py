@@ -19,8 +19,6 @@ if TYPE_CHECKING:
     from settings import Settings
 
 GEOJSON_FILES = [
-    "pais.geojson",
-    "departamentos.geojson",
     "pais_simple.geojson",
     "departamentos_simple.geojson",
 ]
@@ -50,11 +48,11 @@ class LayerRefreshService:  # pylint: disable=too-few-public-methods
         country_url = self.settings.country_geojson_url
         departments_url = self.settings.departments_geojson_url
 
-        country_path = os.path.join(data_dir, _versioned_key("pais.geojson"))
+        country_tmp = os.path.join(data_dir, "pais_raw_tmp.geojson")
         country_simple_path = os.path.join(
             data_dir, _versioned_key("pais_simple.geojson")
         )
-        deptos_path = os.path.join(data_dir, _versioned_key("departamentos.geojson"))
+        deptos_tmp = os.path.join(data_dir, "departamentos_raw_tmp.geojson")
         deptos_simple_path = os.path.join(
             data_dir, _versioned_key("departamentos_simple.geojson")
         )
@@ -62,23 +60,27 @@ class LayerRefreshService:  # pylint: disable=too-few-public-methods
         try:
             self.logger.info("Starting layer refresh: downloading from IGN ...")
             await asyncio.gather(
-                _download(country_url, country_path, self.logger),
-                _download(departments_url, deptos_path, self.logger),
+                _download(country_url, country_tmp, self.logger),
+                _download(departments_url, deptos_tmp, self.logger),
             )
 
             self.logger.info("Simplifying layers ...")
             await asyncio.gather(
-                _simplify(country_path, country_simple_path, tolerance, self.logger),
-                _simplify(deptos_path, deptos_simple_path, tolerance, self.logger),
+                _simplify(country_tmp, country_simple_path, tolerance, self.logger),
+                _simplify(deptos_tmp, deptos_simple_path, tolerance, self.logger),
             )
 
             self.logger.info("Converting layers to FlatGeobuf ...")
             country_fgb = os.path.join(data_dir, _versioned_key("pais.fgb"))
             deptos_fgb = os.path.join(data_dir, _versioned_key("departamentos.fgb"))
             await asyncio.gather(
-                _convert_to_fgb(country_path, country_fgb, self.logger),
-                _convert_to_fgb(deptos_path, deptos_fgb, self.logger),
+                _convert_to_fgb(country_tmp, country_fgb, self.logger),
+                _convert_to_fgb(deptos_tmp, deptos_fgb, self.logger),
             )
+
+            self.logger.info("Removing temporary raw files ...")
+            os.remove(country_tmp)
+            os.remove(deptos_tmp)
 
             self.logger.info("Uploading layers to S3 ...")
             updated_files: list[str] = []
