@@ -17,6 +17,7 @@ from ports.geo_repository import IGeoLayerRepository
 _WORKER_PATH = os.path.abspath(
     os.path.join(os.path.dirname(__file__), "..", "fullres_worker.py")
 )
+_WORKER_ENV = {**os.environ, "OGR_GEOJSON_MAX_OBJ_SIZE": "0"}
 
 # Caps concurrent full-resolution subprocess launches to prevent simultaneous RAM peaks.
 _FULLRES_SEMAPHORE = asyncio.Semaphore(1)
@@ -62,6 +63,7 @@ class GeoIntersectionService:
                 stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                env=_WORKER_ENV,
             )
             stdout_bytes, stderr_bytes = await proc.communicate(payload.encode())
 

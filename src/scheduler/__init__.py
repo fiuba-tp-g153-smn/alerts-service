@@ -43,7 +43,7 @@ def _extract_date(key: str) -> str | None:
 
 
 async def _ensure_layers(settings, logger: Logger, storage: S3ObjectStorage) -> None:
-    """Ensure all geo layers are present locally and in S3 via bidirectional date-stamp reconciliation."""
+    """Ensure all geo layers are present locally and in S3 via date-stamp reconciliation."""
     data_dir = settings.data_dir
     tolerance = float(getattr(settings, "simplify_tolerance", 0.01))
 
@@ -58,7 +58,7 @@ async def _ensure_layers(settings, logger: Logger, storage: S3ObjectStorage) -> 
         return _extract_date(sorted(keys)[-1]) if keys else None
 
     async def _reconcile_file(stem: str, ext: str) -> bool:
-        """Ensure the canonical version is present locally and in S3. Returns False if re-generation is needed."""
+        """Ensure the canonical version exists locally and in S3. Returns False if re-gen needed."""
         local_date = _local_date(stem, ext)
         s3_date = await _s3_date(stem, ext)
 

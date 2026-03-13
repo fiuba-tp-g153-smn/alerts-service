@@ -38,6 +38,19 @@ class LayerRefreshService:  # pylint: disable=too-few-public-methods
         self.storage = storage
         self.logger = logger
 
+    async def _upload_files(self, data_dir: str) -> list[str]:
+        """Delete old S3 keys and upload the current versioned files; return uploaded key names."""
+        uploaded: list[str] = []
+        for fname in GEOJSON_FILES + FGB_FILES:
+            local = os.path.join(data_dir, _versioned_key(fname))
+            stem = os.path.splitext(fname)[0]
+            for key in await self.storage.list_keys(f"{stem}_"):
+                await self.storage.delete(key)
+            new_key = _versioned_key(fname)
+            await self.storage.upload(local, new_key)
+            uploaded.append(new_key)
+        return uploaded
+
     async def run(self) -> LayerRefreshResult:
         """Execute the full refresh cycle and return a result with status and timing."""
         start = time.monotonic()
@@ -83,16 +96,7 @@ class LayerRefreshService:  # pylint: disable=too-few-public-methods
             os.remove(deptos_tmp)
 
             self.logger.info("Uploading layers to S3 ...")
-            updated_files: list[str] = []
-            for fname in GEOJSON_FILES + FGB_FILES:
-                local = os.path.join(data_dir, _versioned_key(fname))
-                stem = os.path.splitext(fname)[0]
-                old_keys = await self.storage.list_keys(f"{stem}_")
-                for key in old_keys:
-                    await self.storage.delete(key)
-                new_key = _versioned_key(fname)
-                await self.storage.upload(local, new_key)
-                updated_files.append(new_key)
+            updated_files = await self._upload_files(data_dir)
 
             duration = time.monotonic() - start
             self.logger.info(f"Layer refresh completed in {duration:.1f}s")

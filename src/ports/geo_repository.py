@@ -19,5 +19,9 @@ class IGeoLayerRepository(ABC):
         """Return the filesystem path for the given layer and resolution without loading it."""
 
     @abstractmethod
+    def get_fullres_fgb_path(self, layer: LayerType) -> str:
+        """Return the filesystem path for the latest full-res FlatGeobuf file."""
+
+    @abstractmethod
     def preload(self) -> None:
         """Preload layers into memory."""

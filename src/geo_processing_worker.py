@@ -1,19 +1,18 @@
 """Subprocess worker for heavy geo processing (simplify, fgb conversion).
 
-Input (stdin): [{"op": "simplify"|"convert_fgb", "in_path": "...", "out_path": "...", "tolerance": 0.01}]
+Input (stdin): [{"op": "simplify"|"convert_fgb", "in_path": "...", "out_path": "...",
+                 "tolerance": 0.01}]
 Output: exits 0 on success, 1 on error (errors printed to stderr).
 """
 
 import json
-import os
 import sys
-
-os.environ.setdefault("OGR_GEOJSON_MAX_OBJ_SIZE", "0")
 
 import geopandas as gpd
 
 
 def main():
+    """Read geo processing tasks from stdin and execute each op (simplify or convert_fgb)."""
     tasks = json.load(sys.stdin)
     for task in tasks:
         op = task["op"]

@@ -10,8 +10,7 @@ from logging import Logger
 
 import aiohttp
 
-os.environ.setdefault("OGR_GEOJSON_MAX_OBJ_SIZE", "0")
-
+_WORKER_ENV = {**os.environ, "OGR_GEOJSON_MAX_OBJ_SIZE": "0"}
 _WORKER_PATH = os.path.abspath(
     os.path.join(os.path.dirname(__file__), "..", "geo_processing_worker.py")
 )
@@ -56,6 +55,7 @@ async def _simplify(
         text=True,
         check=True,
         capture_output=True,
+        env=_WORKER_ENV,
     )
     logger.info(f"Simplified → {out_path}")
 
@@ -71,5 +71,6 @@ async def _convert_to_fgb(in_path: str, out_path: str, logger: Logger) -> None:
         text=True,
         check=True,
         capture_output=True,
+        env=_WORKER_ENV,
     )
     logger.info(f"Converted → {out_path}")

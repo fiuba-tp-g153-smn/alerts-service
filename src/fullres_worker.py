@@ -1,17 +1,16 @@
 """Subprocess worker for full-resolution GeoDataFrame intersection.
 
 Reads a JSON array of requests from stdin:
-  [{"id": "...", "task": "country" | "departments", "geometry_wkb_hex": "...", "layer_path": "...", "bbox": [...] | null}]
+  [{"id": "...", "task": "country" | "departments",
+    "geometry_wkb_hex": "...", "layer_path": "...", "bbox": [...] | null}]
 
-Writes a JSON result dictionary to stdout and exits. The OS reclaims the entire process
-address space on exit — GEOS heap and all glibc arenas — unconditionally.
+Writes a JSON result dictionary to stdout and exits. The OS reclaims the entire
+process address space on exit — GEOS heap and all glibc arenas — unconditionally.
 """
 
 import json
-import os
 import sys
-
-os.environ.setdefault("OGR_GEOJSON_MAX_OBJ_SIZE", "0")
+from typing import Any
 
 import geopandas as gpd
 import numpy as np
@@ -72,7 +71,7 @@ def main():
 
             cache_key = (layer_path, tuple(bbox) if bbox else ())
             if cache_key not in loaded_gdfs:
-                kwargs = {"engine": "pyogrio"}
+                kwargs: dict[str, Any] = {"engine": "pyogrio"}
                 if bbox:
                     kwargs["bbox"] = tuple(bbox)
                 loaded_gdfs[cache_key] = gpd.read_file(layer_path, **kwargs)
