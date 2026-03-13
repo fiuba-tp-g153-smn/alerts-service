@@ -8,6 +8,7 @@ import threading
 import uuid
 import queue
 from logging import Logger
+from typing import Any
 
 _WORKER_PATH = os.path.abspath(
     os.path.join(os.path.dirname(__file__), "..", "fullres_worker.py")
@@ -20,7 +21,7 @@ class FullresBatchManager:
     def __init__(self, logger: Logger):
         """Initialize the batch manager with a background thread."""
         self.logger = logger
-        self.queue = queue.Queue()
+        self.queue: queue.Queue[dict] = queue.Queue()
         self._running = True
         self._thread = threading.Thread(target=self._worker_loop, daemon=True)
         self._thread.start()
@@ -30,7 +31,7 @@ class FullresBatchManager:
         req_id = uuid.uuid4().hex
         event = threading.Event()
 
-        context = {
+        context: dict[str, Any] = {
             "result": None,
             "error": None,
             "event": event,
@@ -54,6 +55,72 @@ class FullresBatchManager:
 
         return context["result"]
 
+    def _process_batch(self, batch: list[dict]) -> None:
+        """Execute one subprocess batch and dispatch results back to callers."""
+        payload_for_worker = [
+            {
+                "id": req["id"],
+                "task": req["task"],
+                "geometry_wkb_hex": req["geometry_wkb_hex"],
+                "layer_path": req["layer_path"],
+            }
+            for req in batch
+        ]
+
+        try:
+            result = subprocess.run(
+                [sys.executable, _WORKER_PATH],
+                input=json.dumps(payload_for_worker),
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            if result.returncode != 0:
+                self.logger.error(
+                    f"Worker subprocess failed with exit code {result.returncode}: "
+                    f"{result.stderr}"
+                )
+                exit_msg = (
+                    f"Subprocess failed (exit {result.returncode}): {result.stderr}"
+                )
+                for req in batch:
+                    req["context"]["error"] = exit_msg
+                    req["context"]["event"].set()
+                return
+
+            try:
+                output = json.loads(result.stdout)
+            except json.JSONDecodeError:
+                self.logger.error(f"Failed to decode worker output: {result.stdout}")
+                for req in batch:
+                    req["context"][
+                        "error"
+                    ] = "Invalid JSON returned from worker subprocess"
+                    req["context"]["event"].set()
+                return
+
+            results = output.get("results", {})
+            errors = output.get("errors", {})
+
+            for req in batch:
+                req_id = req["id"]
+                if req_id in errors:
+                    req["context"]["error"] = errors[req_id]
+                elif req_id in results:
+                    req["context"]["result"] = results[req_id]
+                else:
+                    req["context"][
+                        "error"
+                    ] = "Worker did not return a result for this request"
+                req["context"]["event"].set()
+
+        except Exception as e:  # pylint: disable=broad-exception-caught
+            self.logger.error(f"Batch processing error: {e}")
+            for req in batch:
+                req["context"]["error"] = str(e)
+                req["context"]["event"].set()
+
     def _worker_loop(self):
         """Continuously process batches of requests from the queue."""
         while self._running:
@@ -76,71 +143,7 @@ class FullresBatchManager:
                 f"FullresBatchManager processing batch of size {len(batch)}"
             )
 
-            payload_for_worker = [
-                {
-                    "id": req["id"],
-                    "task": req["task"],
-                    "geometry_wkb_hex": req["geometry_wkb_hex"],
-                    "layer_path": req["layer_path"],
-                }
-                for req in batch
-            ]
-
-            try:
-                result = subprocess.run(
-                    [sys.executable, _WORKER_PATH],
-                    input=json.dumps(payload_for_worker),
-                    capture_output=True,
-                    text=True,
-                    check=False,
-                )
-
-                if result.returncode != 0:
-                    self.logger.error(
-                        f"Worker subprocess failed with exit code {result.returncode}: {result.stderr}"
-                    )
-                    # If the whole subprocess failed, fail all requests in the batch
-                    for req in batch:
-                        req["context"][
-                            "error"
-                        ] = f"Subprocess failed (exit {result.returncode}): {result.stderr}"
-                        req["context"]["event"].set()
-                    continue
-
-                try:
-                    output = json.loads(result.stdout)
-                except json.JSONDecodeError:
-                    self.logger.error(
-                        f"Failed to decode worker output: {result.stdout}"
-                    )
-                    for req in batch:
-                        req["context"][
-                            "error"
-                        ] = "Invalid JSON returned from worker subprocess"
-                        req["context"]["event"].set()
-                    continue
-
-                results = output.get("results", {})
-                errors = output.get("errors", {})
-
-                for req in batch:
-                    req_id = req["id"]
-                    if req_id in errors:
-                        req["context"]["error"] = errors[req_id]
-                    elif req_id in results:
-                        req["context"]["result"] = results[req_id]
-                    else:
-                        req["context"][
-                            "error"
-                        ] = "Worker did not return a result for this request"
-
-                    req["context"]["event"].set()
-
-            except Exception as e:
-                self.logger.error(f"Batch processing error: {e}")
-                for req in batch:
-                    req["context"]["error"] = str(e)
-                    req["context"]["event"].set()
+            self._process_batch(batch)
 
     def stop(self):
         """Stop the background worker thread cleanly."""

@@ -9,6 +9,7 @@ from shapely import wkb as shapely_wkb
 from shapely.geometry import shape
 
 from domain.models import LayerType
+from geo_utils import build_department_features
 from ports.geo_repository import IGeoLayerRepository
 from services.fullres_batch_manager import FullresBatchManager
 
@@ -92,19 +93,7 @@ class GeoIntersectionService:
         self.logger.info(f"intersect_departments: intersect={time.time()-t0:.3f}s")
 
         t0 = time.time()
-        features = []
-        for _, row in intersecting.iterrows():
-            features.append(
-                {
-                    "properties": {
-                        k: row[k]
-                        for k in row.index
-                        if k not in ("geometry", "intersection")
-                    },
-                    "geometry": row["geometry"].__geo_interface__,
-                    "intersection": row["intersection"].__geo_interface__,
-                }
-            )
+        features = build_department_features(intersecting)
         self.logger.info(f"intersect_departments: serialize={time.time()-t0:.3f}s")
 
         return features

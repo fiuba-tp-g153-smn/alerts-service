@@ -14,16 +14,18 @@ import geopandas as gpd
 import numpy as np
 from shapely import wkb as shapely_wkb
 
+from geo_utils import build_department_features
+
 
 class _NumpyEncoder(json.JSONEncoder):
-    def default(self, obj):
-        if isinstance(obj, np.integer):
-            return int(obj)
-        if isinstance(obj, np.floating):
-            return float(obj)
-        if isinstance(obj, np.ndarray):
-            return obj.tolist()
-        return super().default(obj)
+    def default(self, o):
+        if isinstance(o, np.integer):
+            return int(o)
+        if isinstance(o, np.floating):
+            return float(o)
+        if isinstance(o, np.ndarray):
+            return o.tolist()
+        return super().default(o)
 
 
 def _intersect_country(gdf, geom):
@@ -36,23 +38,11 @@ def _intersect_departments(gdf, geom):
     mask = gdf.intersects(geom)
     intersecting = gdf[mask].copy()
     intersecting["intersection"] = intersecting["geometry"].intersection(geom)
-    features = []
-    for _, row in intersecting.iterrows():
-        features.append(
-            {
-                "properties": {
-                    k: row[k]
-                    for k in row.index
-                    if k not in ("geometry", "intersection")
-                },
-                "geometry": row["geometry"].__geo_interface__,
-                "intersection": row["intersection"].__geo_interface__,
-            }
-        )
-    return features
+    return build_department_features(intersecting)
 
 
 def main():
+    """Read batched intersection requests from stdin, process them, and write results to stdout."""
     try:
         payload = json.load(sys.stdin)
     except json.JSONDecodeError:
@@ -64,7 +54,7 @@ def main():
         sys.exit(1)
 
     loaded_gdfs = {}
-    output = {"results": {}, "errors": {}}
+    output: dict[str, dict] = {"results": {}, "errors": {}}
 
     for req in payload:
         req_id = req.get("id")
@@ -89,7 +79,7 @@ def main():
                 output["results"][req_id] = {"features": features}
             else:
                 output["errors"][req_id] = f"Unknown task: {task}"
-        except Exception as e:
+        except Exception as e:  # pylint: disable=broad-exception-caught
             output["errors"][req_id] = str(e)
 
     json.dump(output, sys.stdout, cls=_NumpyEncoder)
