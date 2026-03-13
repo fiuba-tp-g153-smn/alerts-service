@@ -1,14 +1,17 @@
 """Subprocess worker for full-resolution GeoDataFrame intersection.
 
 Reads a JSON array of requests from stdin:
-  [{"id": "...", "task": "country" | "departments", "geometry_wkb_hex": "...", "layer_path": "..."}]
+  [{"id": "...", "task": "country" | "departments", "geometry_wkb_hex": "...", "layer_path": "...", "bbox": [...] | null}]
 
 Writes a JSON result dictionary to stdout and exits. The OS reclaims the entire process
 address space on exit — GEOS heap and all glibc arenas — unconditionally.
 """
 
 import json
+import os
 import sys
+
+os.environ.setdefault("OGR_GEOJSON_MAX_OBJ_SIZE", "0")
 
 import geopandas as gpd
 import numpy as np
@@ -65,11 +68,16 @@ def main():
             task = req["task"]
             geom = shapely_wkb.loads(req["geometry_wkb_hex"], hex=True)
             layer_path = req["layer_path"]
+            bbox = req.get("bbox")
 
-            if layer_path not in loaded_gdfs:
-                loaded_gdfs[layer_path] = gpd.read_file(layer_path)
+            cache_key = (layer_path, tuple(bbox) if bbox else ())
+            if cache_key not in loaded_gdfs:
+                kwargs = {"engine": "pyogrio"}
+                if bbox:
+                    kwargs["bbox"] = tuple(bbox)
+                loaded_gdfs[cache_key] = gpd.read_file(layer_path, **kwargs)
 
-            gdf = loaded_gdfs[layer_path]
+            gdf = loaded_gdfs[cache_key]
 
             if task == "country":
                 result = _intersect_country(gdf, geom)

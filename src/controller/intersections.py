@@ -18,7 +18,7 @@ router = APIRouter(prefix="/intersect", tags=["Geo Intersection"])
     summary="Intersect polygon with Argentina",
     response_description="Returns intersection with Argentina's territory",
 )
-def intersect_country(
+async def intersect_country(
     geojson: GeoJSONInput,
     use_simplified: bool = Query(
         True, description="Use simplified geometries (faster, lower detail)"
@@ -35,7 +35,7 @@ def intersect_country(
     start_time = time.time()
     try:
         geometry = geojson.extract_geometry()
-        result = service.intersect_country(geometry, use_simplified)
+        result = await service.intersect_country(geometry, use_simplified)
         elapsed = time.time() - start_time
         logger.info(f"intersect_country (simplified={use_simplified}): {elapsed:.3f}s")
         return JSONResponse(content=result)
@@ -52,7 +52,7 @@ def intersect_country(
     summary="Intersect polygon with departments",
     response_description="Returns list of intersecting departments with geometries",
 )
-def intersect_departments(
+async def intersect_departments(
     geojson: GeoJSONInput,
     use_simplified: bool = Query(
         True, description="Use simplified geometries (faster, lower detail)"
@@ -71,7 +71,7 @@ def intersect_departments(
     start_time = time.time()
     try:
         geometry = geojson.extract_geometry()
-        features = service.intersect_departments(geometry, use_simplified)
+        features = await service.intersect_departments(geometry, use_simplified)
         elapsed = time.time() - start_time
         logger.info(
             f"intersect_departments (simplified={use_simplified}): {elapsed:.3f}s"

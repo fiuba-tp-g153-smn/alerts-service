@@ -1,14 +1,20 @@
 """Low-level helpers for downloading and simplifying GeoJSON layer files."""
 
 import asyncio
+import json
 import os
+import subprocess
+import sys
 from datetime import date
 from logging import Logger
 
 import aiohttp
-import geopandas as gpd
 
 os.environ.setdefault("OGR_GEOJSON_MAX_OBJ_SIZE", "0")
+
+_WORKER_PATH = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "..", "geo_processing_worker.py")
+)
 
 
 def _versioned_key(fname: str) -> str:
@@ -35,11 +41,35 @@ async def _simplify(
 ) -> None:
     """Simplify a GeoJSON layer with the given tolerance and save it to out_path."""
     logger.info(f"Simplifying {in_path} (tolerance={tolerance}) ...")
-
-    def _run():
-        gdf = gpd.read_file(in_path)
-        gdf["geometry"] = gdf["geometry"].simplify(tolerance, preserve_topology=True)
-        gdf.to_file(out_path, driver="GeoJSON")
-
-    await asyncio.to_thread(_run)
+    task = [
+        {
+            "op": "simplify",
+            "in_path": in_path,
+            "out_path": out_path,
+            "tolerance": tolerance,
+        }
+    ]
+    await asyncio.to_thread(
+        subprocess.run,
+        [sys.executable, _WORKER_PATH],
+        input=json.dumps(task),
+        text=True,
+        check=True,
+        capture_output=True,
+    )
     logger.info(f"Simplified → {out_path}")
+
+
+async def _convert_to_fgb(in_path: str, out_path: str, logger: Logger) -> None:
+    """Convert a GeoJSON file to FlatGeobuf format for bbox-indexed streaming reads."""
+    logger.info(f"Converting {in_path} to FlatGeobuf ...")
+    task = [{"op": "convert_fgb", "in_path": in_path, "out_path": out_path}]
+    await asyncio.to_thread(
+        subprocess.run,
+        [sys.executable, _WORKER_PATH],
+        input=json.dumps(task),
+        text=True,
+        check=True,
+        capture_output=True,
+    )
+    logger.info(f"Converted → {out_path}")

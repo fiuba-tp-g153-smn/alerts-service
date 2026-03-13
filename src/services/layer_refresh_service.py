@@ -8,7 +8,12 @@ from typing import TYPE_CHECKING
 
 from domain.models import LayerRefreshResult
 from ports.object_storage import IObjectStorage
-from scheduler.layer_refresh_job import _download, _simplify, _versioned_key
+from scheduler.layer_refresh_job import (
+    _convert_to_fgb,
+    _download,
+    _simplify,
+    _versioned_key,
+)
 
 if TYPE_CHECKING:
     from settings import Settings
@@ -18,6 +23,11 @@ GEOJSON_FILES = [
     "departamentos.geojson",
     "pais_simple.geojson",
     "departamentos_simple.geojson",
+]
+
+FGB_FILES = [
+    "pais.fgb",
+    "departamentos.fgb",
 ]
 
 
@@ -62,9 +72,17 @@ class LayerRefreshService:  # pylint: disable=too-few-public-methods
                 _simplify(deptos_path, deptos_simple_path, tolerance, self.logger),
             )
 
+            self.logger.info("Converting layers to FlatGeobuf ...")
+            country_fgb = os.path.join(data_dir, _versioned_key("pais.fgb"))
+            deptos_fgb = os.path.join(data_dir, _versioned_key("departamentos.fgb"))
+            await asyncio.gather(
+                _convert_to_fgb(country_path, country_fgb, self.logger),
+                _convert_to_fgb(deptos_path, deptos_fgb, self.logger),
+            )
+
             self.logger.info("Uploading layers to S3 ...")
             updated_files: list[str] = []
-            for fname in GEOJSON_FILES:
+            for fname in GEOJSON_FILES + FGB_FILES:
                 local = os.path.join(data_dir, _versioned_key(fname))
                 stem = os.path.splitext(fname)[0]
                 old_keys = await self.storage.list_keys(f"{stem}_")

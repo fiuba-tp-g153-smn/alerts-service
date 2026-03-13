@@ -9,7 +9,6 @@ from fastapi import Depends
 from adapters.geo_layer_repository import FileSystemGeoLayerRepository
 from adapters.sqlite_history import SqliteHistoryRepository
 from initializers import init_logger
-from services.fullres_batch_manager import FullresBatchManager
 from services.geo_intersection_service import GeoIntersectionService
 from settings import Settings
 
@@ -26,18 +25,6 @@ def get_logger(settings: Settings = Depends(get_settings)) -> Logger:
 
 
 @lru_cache
-def get_batch_manager() -> FullresBatchManager:
-    """Return the singleton batch manager for full resolution requests.
-
-    Using lru_cache without arguments creates a true singleton instance
-    that lives for the duration of the application.
-    """
-    settings = get_settings()
-    logger = init_logger(settings)
-    return FullresBatchManager(logger)
-
-
-@lru_cache
 def get_geo_repo() -> FileSystemGeoLayerRepository:
     """Return a singleton filesystem-backed geo layer repository."""
     settings = get_settings()
@@ -48,10 +35,9 @@ def get_geo_repo() -> FileSystemGeoLayerRepository:
 def get_intersection_service(
     repo: FileSystemGeoLayerRepository = Depends(get_geo_repo),
     logger: Logger = Depends(get_logger),
-    batch_manager: FullresBatchManager = Depends(get_batch_manager),
 ) -> GeoIntersectionService:
     """Return the geo intersection service."""
-    return GeoIntersectionService(repo, logger, batch_manager)
+    return GeoIntersectionService(repo, logger)
 
 
 def get_history_repo(
