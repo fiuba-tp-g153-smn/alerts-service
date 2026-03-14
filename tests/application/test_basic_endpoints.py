@@ -24,3 +24,14 @@ def test_root_ok(app_client):
 def test_health_check(app_client):
     response = app_client.get("/health")
     assert response.status_code == 200
+    assert response.json() == {"status": "running"}
+
+
+def test_root_content_type_is_json(app_client):
+    response = app_client.get("/")
+    assert response.headers["content-type"].startswith("application/json")
+
+
+def test_health_check_content_type_is_json(app_client):
+    response = app_client.get("/health")
+    assert response.headers["content-type"].startswith("application/json")

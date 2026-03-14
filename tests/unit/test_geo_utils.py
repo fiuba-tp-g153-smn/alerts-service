@@ -34,13 +34,39 @@ def test_properties_exclude_geometry_and_intersection(intersecting_gdf):
         assert "intersection" not in feature["properties"]
 
 
-def test_geometry_and_intersection_are_geo_interface_dicts(intersecting_gdf):
+def test_geometry_type_and_coordinates_present(intersecting_gdf):
     features = build_department_features(intersecting_gdf)
     for feature in features:
-        assert isinstance(feature["geometry"], dict)
-        assert "type" in feature["geometry"]
-        assert isinstance(feature["intersection"], dict)
-        assert "type" in feature["intersection"]
+        assert feature["geometry"]["type"] in (
+            "Polygon",
+            "MultiPolygon",
+            "GeometryCollection",
+        )
+        assert "coordinates" in feature["geometry"]
+        assert feature["geometry"] != feature["intersection"]
+
+
+def test_each_feature_has_exactly_correct_property_keys(intersecting_gdf):
+    features = build_department_features(intersecting_gdf)
+    assert set(features[0]["properties"].keys()) == {"nombre", "in_id"}
+
+
+def test_property_values_match_source_data(intersecting_gdf):
+    features = build_department_features(intersecting_gdf)
+    assert features[0]["properties"]["nombre"] == "Dep1"
+    assert features[1]["properties"]["nombre"] == "Dep2"
+
+
+def test_geometry_coordinates_match_source_shapely_geometry(intersecting_gdf):
+    features = build_department_features(intersecting_gdf)
+    expected = box(-55, -27, -53, -26).__geo_interface__
+    assert features[0]["geometry"]["coordinates"] == expected["coordinates"]
+
+
+def test_row_order_preserved_in_output(intersecting_gdf):
+    features = build_department_features(intersecting_gdf)
+    assert features[0]["properties"]["nombre"] == "Dep1"
+    assert features[1]["properties"]["nombre"] == "Dep2"
 
 
 def test_empty_dataframe_returns_empty_list():
