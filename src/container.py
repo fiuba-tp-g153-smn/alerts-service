@@ -40,8 +40,8 @@ def get_intersection_service(
     return GeoIntersectionService(repo, logger)
 
 
-def get_history_repo(
-    settings: Settings = Depends(get_settings),
-) -> SqliteHistoryRepository:
-    """Return the SQLite job history repository."""
+@lru_cache
+def get_history_repo() -> SqliteHistoryRepository:
+    """Return a singleton SQLite job history repository."""
+    settings = get_settings()
     return SqliteHistoryRepository(os.path.join(settings.data_dir, "history.db"))
