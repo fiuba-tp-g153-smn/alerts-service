@@ -35,11 +35,11 @@ services:
       - SIMPLIFY_TOLERANCE=${SIMPLIFY_TOLERANCE}
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')"]
-      interval: 10s
+      interval: 30s
       timeout: 10s
-      retries: 5
-      start_period: 15s
-      start_interval: 1s
+      retries: 3
+      start_period: 5m
+      start_interval: 10s
     networks:
       - alerts_service_network
 
