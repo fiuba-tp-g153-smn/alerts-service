@@ -64,3 +64,40 @@ def test_get_layer_caches_simplified_layers(mock_read_file, tmp_path):
     result4 = repo.get_layer(LayerType.COUNTRY, simplified=False)
     assert mock_read_file.call_count == 2
     assert result4 is mock_gdf
+
+
+def test_get_fullres_fgb_path_returns_latest(tmp_path):
+    logger = MagicMock()
+    repo = FileSystemGeoLayerRepository(str(tmp_path), logger)
+
+    (tmp_path / "pais_20240101.fgb").touch()
+    (tmp_path / "pais_20240301.fgb").touch()
+
+    result = repo.get_fullres_fgb_path(LayerType.COUNTRY)
+
+    assert result.endswith("pais_20240301.fgb")
+
+
+def test_get_fullres_fgb_path_raises_when_no_fgb(tmp_path):
+    logger = MagicMock()
+    repo = FileSystemGeoLayerRepository(str(tmp_path), logger)
+
+    with pytest.raises(FileNotFoundError):
+        repo.get_fullres_fgb_path(LayerType.COUNTRY)
+
+
+@patch("adapters.geo_layer_repository.gpd.read_file")
+def test_preload_loads_both_layers(mock_read_file, tmp_path):
+    logger = MagicMock()
+    repo = FileSystemGeoLayerRepository(str(tmp_path), logger)
+
+    (tmp_path / "pais_simple_20240101.geojson").touch()
+    (tmp_path / "departamentos_simple_20240101.geojson").touch()
+
+    mock_gdf = MagicMock(spec=gpd.GeoDataFrame)
+    mock_gdf.__len__.return_value = 1
+    mock_read_file.return_value = mock_gdf
+
+    repo.preload()
+
+    assert mock_read_file.call_count == 2

@@ -1,4 +1,4 @@
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import geopandas as gpd
 import pytest
@@ -19,13 +19,8 @@ def mock_repo():
 
 
 @pytest.fixture
-def mock_batch_manager():
-    return MagicMock()
-
-
-@pytest.fixture
-def service(mock_repo, mock_logger, mock_batch_manager):
-    return GeoIntersectionService(mock_repo, mock_logger, mock_batch_manager)
+def service(mock_repo, mock_logger):
+    return GeoIntersectionService(mock_repo, mock_logger)
 
 
 @pytest.fixture
@@ -61,35 +56,110 @@ def test_geometry():
     }
 
 
-def test_intersect_country_returns_feature_collection(
+async def test_intersect_country_simplified_returns_feature_collection(
     service, mock_repo, country_gdf, test_geometry
 ):
     mock_repo.get_layer.return_value = country_gdf
 
-    result = service.intersect_country(test_geometry, simplified=True)
+    result = await service.intersect_country(test_geometry, simplified=True)
 
     mock_repo.get_layer.assert_called_once_with(LayerType.COUNTRY, True)
     assert result["type"] == "FeatureCollection"
     assert "features" in result
 
 
-def test_intersect_departments_returns_list(
+async def test_intersect_country_simplified_no_intersection(service, mock_repo):
+    geom = box(-80, -50, -70, -40)
+    gdf = gpd.GeoDataFrame({"name": ["Far Away"]}, geometry=[geom], crs="EPSG:4326")
+    mock_repo.get_layer.return_value = gdf
+
+    test_geom = {
+        "type": "Polygon",
+        "coordinates": [
+            [
+                [-55.5, -26.5],
+                [-54.5, -26.5],
+                [-54.5, -26.0],
+                [-55.5, -26.0],
+                [-55.5, -26.5],
+            ]
+        ],
+    }
+
+    result = await service.intersect_country(test_geom, simplified=True)
+
+    assert result["features"] == []
+
+
+async def test_intersect_departments_simplified_filters_correctly(
     service, mock_repo, deptos_gdf, test_geometry
 ):
     mock_repo.get_layer.return_value = deptos_gdf
 
-    result = service.intersect_departments(test_geometry, simplified=True)
+    result = await service.intersect_departments(test_geometry, simplified=True)
 
     mock_repo.get_layer.assert_called_once_with(LayerType.DEPARTMENTS, True)
-    assert isinstance(result, list)
-    # Only Dep1 intersects the test polygon
     assert len(result) == 1
     assert result[0]["properties"]["nombre"] == "Dep1"
     assert "geometry" in result[0]
     assert "intersection" in result[0]
 
 
-def test_intersect_country_invalid_geometry_raises(service, mock_repo):
+async def test_intersect_departments_simplified_no_match(service, mock_repo):
+    geom1 = box(-80, -40, -70, -30)
+    geom2 = box(-60, -50, -50, -40)
+    gdf = gpd.GeoDataFrame(
+        {"nombre": ["Dep1", "Dep2"], "in_id": [1, 2]},
+        geometry=[geom1, geom2],
+        crs="EPSG:4326",
+    )
+    mock_repo.get_layer.return_value = gdf
+
+    test_geom = {
+        "type": "Polygon",
+        "coordinates": [
+            [
+                [-55.5, -26.5],
+                [-54.5, -26.5],
+                [-54.5, -26.0],
+                [-55.5, -26.0],
+                [-55.5, -26.5],
+            ]
+        ],
+    }
+
+    result = await service.intersect_departments(test_geom, simplified=True)
+
+    assert result == []
+
+
+async def test_intersect_country_invalid_geometry_raises(service, mock_repo):
     invalid_geometry = {"type": "Invalid", "coordinates": []}
-    with pytest.raises((ValueError, Exception)):
-        service.intersect_country(invalid_geometry, simplified=True)
+    with pytest.raises(Exception):
+        await service.intersect_country(invalid_geometry, simplified=True)
+
+
+async def test_intersect_country_fullres_delegates_to_subprocess(
+    service, mock_repo, test_geometry
+):
+    mock_repo.get_fullres_fgb_path.return_value = "/fake/path.fgb"
+    expected = {"type": "FeatureCollection", "features": []}
+    service._run_fullres_subprocess = AsyncMock(return_value=expected)
+
+    result = await service.intersect_country(test_geometry, simplified=False)
+
+    service._run_fullres_subprocess.assert_called_once()
+    assert result == expected
+
+
+async def test_intersect_departments_fullres_delegates_to_subprocess(
+    service, mock_repo, test_geometry
+):
+    mock_repo.get_fullres_fgb_path.return_value = "/fake/path.fgb"
+    subprocess_result = {"features": []}
+    service._run_fullres_subprocess = AsyncMock(return_value=subprocess_result)
+
+    result = await service.intersect_departments(test_geometry, simplified=False)
+
+    service._run_fullres_subprocess.assert_called_once()
+    assert result == []
