@@ -1,11 +1,14 @@
 """Scheduler setup and layer-ensuring logic for the alerts service."""
 
 import glob as _glob
+import json
 import os
+import pickle
 from logging import Logger
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
+from shapely.geometry import shape as shapely_shape
 
 from adapters.s3_storage import S3ObjectStorage
 from adapters.sqlite_history import SqliteHistoryRepository
@@ -29,6 +32,15 @@ _LAYERS = [
         "fgb_stem": "departamentos",
         "url_attr": "departments_geojson_url",
         "raw_tmp": "departamentos_raw_tmp.geojson",
+    },
+]
+
+# Alert-specific layers: simplified GeoJSON only (no FGB, no S3 sync needed)
+_ALERT_LAYERS = [
+    {
+        "simplified_stem": "provincias_simple",
+        "url_attr": "provinces_geojson_url",
+        "raw_tmp": "provincias_raw_tmp.geojson",
     },
 ]
 
@@ -119,6 +131,69 @@ async def _ensure_layers(settings, logger: Logger, storage: S3ObjectStorage) -> 
     logger.info("All geo layers are ready.")
 
 
+async def _ensure_alert_layers(settings, logger: Logger) -> None:
+    """Ensure alert-specific layers are present locally (simplified GeoJSON only)."""
+    data_dir = settings.data_dir
+    tolerance = float(getattr(settings, "simplify_tolerance", 0.01))
+
+    def _local_date(stem: str) -> str | None:
+        matches = sorted(_glob.glob(os.path.join(data_dir, f"{stem}_????????.geojson")))
+        return _extract_date(matches[-1]) if matches else None
+
+    for layer in _ALERT_LAYERS:
+        if _local_date(layer["simplified_stem"]) is not None:
+            logger.info(f"{layer['simplified_stem']}: ready.")
+            continue
+
+        logger.info(f"Downloading alert layer: {layer['simplified_stem']} ...")
+        url = getattr(settings, layer["url_attr"])
+        raw_tmp = os.path.join(data_dir, layer["raw_tmp"])
+        simplified_path = os.path.join(
+            data_dir, _versioned_key(f"{layer['simplified_stem']}.geojson")
+        )
+
+        await _download(url, raw_tmp, logger)
+        await _simplify(raw_tmp, simplified_path, tolerance, logger)
+        os.remove(raw_tmp)
+        logger.info(f"{layer['simplified_stem']}: ready.")
+
+
+async def _build_alert_cache(settings, logger: Logger) -> None:
+    """Build dept/prov spatial index pickles from simplified GeoJSON files."""
+    data_dir = settings.data_dir
+    cache_dir = settings.alert_cache_dir
+    os.makedirs(cache_dir, exist_ok=True)
+
+    def _latest_geojson(stem: str) -> str | None:
+        matches = sorted(_glob.glob(os.path.join(data_dir, f"{stem}_????????.geojson")))
+        return matches[-1] if matches else None
+
+    def _build_index(path: str) -> list:
+        with open(path, encoding="utf-8") as f:
+            gj = json.load(f)
+        index = []
+        for feat in gj["features"]:
+            g = shapely_shape(feat["geometry"])
+            index.append((g.bounds, g))
+        return index
+
+    for stem, out_name in [
+        ("departamentos_simple", "dept_index.pkl"),
+        ("provincias_simple", "prov_index.pkl"),
+    ]:
+        path = _latest_geojson(stem)
+        if not path:
+            logger.warning(f"No {stem} geojson found — skipping {out_name}")
+            continue
+        logger.info(f"Building {out_name} from {os.path.basename(path)} ...")
+        index = _build_index(path)
+        out = os.path.join(cache_dir, out_name)
+        with open(out, "wb") as f:
+            pickle.dump(index, f, protocol=pickle.HIGHEST_PROTOCOL)
+        size_mb = os.path.getsize(out) / 1024 / 1024
+        logger.info(f"  → {len(index)} geometries → {out_name} ({size_mb:.1f} MB)")
+
+
 async def setup_scheduler(settings, logger: Logger) -> AsyncIOScheduler:
     """Configure and return an AsyncIOScheduler with the layer refresh cron job."""
     data_dir = settings.data_dir
@@ -126,6 +201,8 @@ async def setup_scheduler(settings, logger: Logger) -> AsyncIOScheduler:
 
     storage = S3ObjectStorage(settings, logger)
     await _ensure_layers(settings, logger, storage)
+    await _ensure_alert_layers(settings, logger)
+    await _build_alert_cache(settings, logger)
 
     db_path = os.path.join(data_dir, "history.db")
     history = SqliteHistoryRepository(db_path)

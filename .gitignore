@@ -66,6 +66,8 @@ junit_report.xml
 reports/
 
 data/
+src/cache/
+output/
 # Test results (keep test script and input polygon)
 tests/country_*.json
 tests/departments_*.json

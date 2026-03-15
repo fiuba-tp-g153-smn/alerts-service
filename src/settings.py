@@ -36,6 +36,22 @@ class Settings:  # pylint: disable=too-many-instance-attributes,too-few-public-m
         "?service=WFS&version=1.0.0&request=GetFeature"
         "&typeName=ign:departamento&outputFormat=application/json"
     )
+    provinces_geojson_url: str = (
+        "https://wms.ign.gob.ar/geoserver/ows"
+        "?service=WFS&version=1.0.0&request=GetFeature"
+        "&typeName=ign:provincia&outputFormat=application/json"
+    )
+
+    # MySQL Database
+    mysql_host: str = ""
+    mysql_port: int = 3306
+    mysql_database: str = ""
+    mysql_user: str = ""
+    mysql_password: str = ""
+
+    # Alert Generation
+    output_dir: str = ""
+    alert_cache_dir: str = ""
 
     def __init__(self):
         self._load_from_env()
@@ -66,6 +82,18 @@ class Settings:  # pylint: disable=too-many-instance-attributes,too-few-public-m
         self.departments_geojson_url = os.getenv(
             "DEPARTMENTS_GEOJSON_URL", self.departments_geojson_url
         )
+        self.provinces_geojson_url = os.getenv(
+            "PROVINCES_GEOJSON_URL", self.provinces_geojson_url
+        )
+
+        self.mysql_host = os.getenv("MYSQL_HOST", self.mysql_host)
+        self.mysql_port = int(os.getenv("MYSQL_PORT", str(self.mysql_port)))
+        self.mysql_database = os.getenv("MYSQL_DATABASE", self.mysql_database)
+        self.mysql_user = os.getenv("MYSQL_USER", self.mysql_user)
+        self.mysql_password = os.getenv("MYSQL_PASSWORD", self.mysql_password)
+
+        self.output_dir = os.getenv("OUTPUT_DIR", self.output_dir)
+        self.alert_cache_dir = os.getenv("ALERT_CACHE_DIR", self.alert_cache_dir)
 
     @staticmethod
     def get_settings() -> "Settings":
