@@ -25,14 +25,14 @@ services:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root2024}
       MYSQL_DATABASE: aviso_gempak
       MYSQL_USER: avisos
-      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-avisos2024}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
     volumes:
       - mysql_data:/var/lib/mysql
       - ./sql:/docker-entrypoint-initdb.d:ro
     ports:
       - "3306:3306"
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "avisos", "-p${MYSQL_PASSWORD:-avisos2024}"]
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "avisos", "-p${MYSQL_PASSWORD}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -63,7 +63,7 @@ services:
       - MYSQL_PORT=3306
       - MYSQL_DATABASE=aviso_gempak
       - MYSQL_USER=avisos
-      - MYSQL_PASSWORD=${MYSQL_PASSWORD:-avisos2024}
+      - MYSQL_PASSWORD=${MYSQL_PASSWORD}
       - OUTPUT_DIR=/app/output/alerts
       - ALERT_CACHE_DIR=/app/cache
     healthcheck:
