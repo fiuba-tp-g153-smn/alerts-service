@@ -12,6 +12,8 @@ from scheduler.layer_refresh_job import (
     _convert_to_fgb,
     _download,
     _simplify,
+    _tolerance_str,
+    _tolerance_versioned_key,
     _versioned_key,
 )
 
@@ -31,20 +33,22 @@ class LayerRefreshService:  # pylint: disable=too-few-public-methods
         self.logger = logger
 
     def _simplified_fnames(self) -> list[str]:
-        """Return the list of simplified GeoJSON filenames for all configured levels."""
+        """Return simplified GeoJSON filenames (with tolerance) for all configured levels."""
         fnames = []
-        for level in self.settings.simplification_levels:
-            fnames.append(f"pais_simple_L{level}.geojson")
-            fnames.append(f"departamentos_simple_L{level}.geojson")
+        for level, tolerance in self.settings.simplification_levels.items():
+            tol = _tolerance_str(tolerance)
+            fnames.append(f"pais_simple_L{level}_T{tol}.geojson")
+            fnames.append(f"departamentos_simple_L{level}_T{tol}.geojson")
         return fnames
 
     async def _upload_files(self, data_dir: str) -> list[str]:
-        """Delete old S3 keys and upload the current versioned files; return uploaded key names."""
+        """Delete old S3 keys for each level and upload the current versioned files."""
         uploaded: list[str] = []
         for fname in self._simplified_fnames() + _FGB_FILES:
             local = os.path.join(data_dir, _versioned_key(fname))
-            stem = os.path.splitext(fname)[0]
-            for key in await self.storage.list_keys(f"{stem}_"):
+            # Use level-only prefix (strip _T{tol} suffix) to sweep old-tolerance S3 keys
+            level_stem = os.path.splitext(fname)[0].split("_T")[0]
+            for key in await self.storage.list_keys(f"{level_stem}_"):
                 await self.storage.delete(key)
             new_key = _versioned_key(fname)
             await self.storage.upload(local, new_key)
@@ -78,7 +82,10 @@ class LayerRefreshService:  # pylint: disable=too-few-public-methods
                     _simplify(
                         country_tmp,
                         os.path.join(
-                            data_dir, _versioned_key(f"pais_simple_L{level}.geojson")
+                            data_dir,
+                            _tolerance_versioned_key(
+                                f"pais_simple_L{level}.geojson", tolerance
+                            ),
                         ),
                         tolerance,
                         self.logger,
@@ -89,7 +96,9 @@ class LayerRefreshService:  # pylint: disable=too-few-public-methods
                         deptos_tmp,
                         os.path.join(
                             data_dir,
-                            _versioned_key(f"departamentos_simple_L{level}.geojson"),
+                            _tolerance_versioned_key(
+                                f"departamentos_simple_L{level}.geojson", tolerance
+                            ),
                         ),
                         tolerance,
                         self.logger,

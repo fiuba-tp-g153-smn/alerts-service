@@ -23,10 +23,22 @@ _FULLRES_STEMS = {
 
 
 def _versioned_stem(data_dir: str, stem: str) -> str:
-    """Return the path to the latest versioned file matching the given stem."""
+    """Return the path to the latest versioned full-res GeoJSON matching the given stem."""
     matches = sorted(glob.glob(os.path.join(data_dir, f"{stem}_????????.geojson")))
     if not matches:
         raise FileNotFoundError(f"No data file found for {stem}")
+    return matches[-1]
+
+
+def _simplified_stem(data_dir: str, stem: str, level: int) -> str:
+    """Return the path to the latest versioned simplified GeoJSON for the given level."""
+    matches = sorted(
+        glob.glob(os.path.join(data_dir, f"{stem}_L{level}_T*_????????.geojson"))
+    )
+    if not matches:
+        raise FileNotFoundError(
+            f"No simplified data file found for {stem} level {level}"
+        )
     return matches[-1]
 
 
@@ -41,8 +53,7 @@ class FileSystemGeoLayerRepository(IGeoLayerRepository):
 
     def get_layer(self, layer: LayerType, level: int) -> gpd.GeoDataFrame:
         """Load and return the GeoDataFrame for the given layer and simplification level."""
-        stem = f"{_SIMPLIFIED_STEMS[layer]}_L{level}"
-        path = _versioned_stem(self.data_dir, stem)
+        path = _simplified_stem(self.data_dir, _SIMPLIFIED_STEMS[layer], level)
 
         cached = self._cache.get((layer, level))
         if cached is not None:

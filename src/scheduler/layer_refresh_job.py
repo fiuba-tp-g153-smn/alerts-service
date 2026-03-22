@@ -22,6 +22,17 @@ def _versioned_key(fname: str) -> str:
     return f"{stem}_{date.today().strftime('%Y%m%d')}{ext}"
 
 
+def _tolerance_str(tolerance: float) -> str:
+    """Encode a tolerance as a filename-safe string. 0.0001 → '0p0001'."""
+    return str(tolerance).replace(".", "p")
+
+
+def _tolerance_versioned_key(fname: str, tolerance: float) -> str:
+    """Return a tolerance+date-stamped filename, e.g. pais_simple_L1_T0p0001_20260312.geojson."""
+    stem, ext = os.path.splitext(fname)
+    return f"{stem}_T{_tolerance_str(tolerance)}_{date.today().strftime('%Y%m%d')}{ext}"
+
+
 async def _download(url: str, out_path: str, logger: Logger) -> None:
     """Download a URL to a local path, logging progress and file size."""
     logger.info(f"Downloading {url} ...")

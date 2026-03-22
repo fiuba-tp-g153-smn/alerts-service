@@ -62,8 +62,8 @@ async def test_run_success_returns_success_result(service, tmp_raw_files):
     assert result.status == "success"
     assert isinstance(result.files, list)
     assert len(result.files) == 4
-    assert any("pais_simple_L" in f for f in result.files)
-    assert any("departamentos_simple_L" in f for f in result.files)
+    assert any("pais_simple_L" in f and "_T" in f for f in result.files)
+    assert any("departamentos_simple_L" in f and "_T" in f for f in result.files)
     assert any(f.endswith(".fgb") for f in result.files)
     assert result.error is None
 
@@ -84,7 +84,7 @@ async def test_run_deletes_old_s3_keys_before_uploading(
 ):
     async def mock_list_keys(prefix):
         if prefix == "pais_simple_L1_":
-            return ["pais_simple_L1_20240101.geojson"]
+            return ["pais_simple_L1_T0p0005_20240101.geojson"]
         return []
 
     mock_storage.list_keys.side_effect = mock_list_keys
@@ -96,7 +96,9 @@ async def test_run_deletes_old_s3_keys_before_uploading(
     ):
         await service.run()
 
-    mock_storage.delete.assert_called_once_with("pais_simple_L1_20240101.geojson")
+    mock_storage.delete.assert_called_once_with(
+        "pais_simple_L1_T0p0005_20240101.geojson"
+    )
 
 
 async def test_run_failure_returns_failed_result(service):
@@ -159,6 +161,11 @@ async def test_run_success_calls_simplify_with_configured_tolerances(
 
     tolerance_values = {call.args[2] for call in mock_simplify.call_args_list}
     assert tolerance_values == {0.001, 0.05}
+
+    # Confirm tolerance is also encoded in the output path
+    out_paths = [call.args[1] for call in mock_simplify.call_args_list]
+    assert any("_T0p001_" in p for p in out_paths)
+    assert any("_T0p05_" in p for p in out_paths)
 
 
 async def test_run_failure_when_simplify_raises_returns_failed_result(
