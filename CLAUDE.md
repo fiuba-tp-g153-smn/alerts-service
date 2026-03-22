@@ -69,7 +69,7 @@ Copy `.env.example` to `.env`. Key variables:
 |---|---|---|
 | `APP_ENV` | `development` | `production` enables NewRelic JSON logging |
 | `SIMPLIFY_TOLERANCE` | `0.01` | Geometry simplification (0.001–0.1) |
-| `LAYER_UPDATE_CRON` | `0 3 * * 0` | Cron for layer refresh |
+| `layer_update_cron` (settings.json) | `0 3 * * 0` | Cron for layer refresh |
 | `S3_ENDPOINT` / `S3_BUCKET_NAME` | (empty) | Required for S3 backup |
 | `COUNTRY_GEOJSON_URL` / `DEPARTMENTS_GEOJSON_URL` | IGN WFS URLs | Override data source |
 

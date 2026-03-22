@@ -55,74 +55,67 @@ class LayerRefreshService:  # pylint: disable=too-few-public-methods
             uploaded.append(new_key)
         return uploaded
 
+    async def _download_layers(self, country_tmp: str, deptos_tmp: str) -> None:
+        self.logger.info("Starting layer refresh: downloading from IGN ...")
+        await asyncio.gather(
+            self.processor.download(self.settings.country_geojson_url, country_tmp),
+            self.processor.download(self.settings.departments_geojson_url, deptos_tmp),
+        )
+
+    async def _simplify_layers(self, country_tmp: str, deptos_tmp: str) -> None:
+        self.logger.info("Simplifying layers ...")
+        data_dir = self.settings.data_dir
+        tasks = []
+        for level, tolerance in self.settings.simplification_levels.items():
+            for stem, tmp in [
+                ("pais_simple", country_tmp),
+                ("departamentos_simple", deptos_tmp),
+            ]:
+                out = os.path.join(
+                    data_dir,
+                    IGeoLayerProcessor.tolerance_versioned_key(
+                        f"{stem}_L{level}.geojson", tolerance
+                    ),
+                )
+                tasks.append(self.processor.simplify(tmp, out, tolerance))
+        await asyncio.gather(*tasks)
+
+    async def _convert_to_fgb_layers(self, country_tmp: str, deptos_tmp: str) -> None:
+        self.logger.info("Converting layers to FlatGeobuf ...")
+        data_dir = self.settings.data_dir
+        await asyncio.gather(
+            self.processor.convert_to_fgb(
+                country_tmp,
+                os.path.join(data_dir, IGeoLayerProcessor.versioned_key("pais.fgb")),
+            ),
+            self.processor.convert_to_fgb(
+                deptos_tmp,
+                os.path.join(
+                    data_dir, IGeoLayerProcessor.versioned_key("departamentos.fgb")
+                ),
+            ),
+        )
+
+    def _cleanup_tmp(self, country_tmp: str, deptos_tmp: str) -> None:
+        self.logger.info("Removing temporary raw files ...")
+        os.remove(country_tmp)
+        os.remove(deptos_tmp)
+
     async def run(self) -> LayerRefreshResult:
         """Execute the full refresh cycle and return a result with status and timing."""
         start = time.monotonic()
         data_dir = self.settings.data_dir
         os.makedirs(data_dir, exist_ok=True)
-        levels: dict[int, float] = self.settings.simplification_levels
-
-        country_url = self.settings.country_geojson_url
-        departments_url = self.settings.departments_geojson_url
-
         country_tmp = os.path.join(data_dir, "pais_raw_tmp.geojson")
         deptos_tmp = os.path.join(data_dir, "departamentos_raw_tmp.geojson")
 
         try:
-            self.logger.info("Starting layer refresh: downloading from IGN ...")
-            await asyncio.gather(
-                self.processor.download(country_url, country_tmp),
-                self.processor.download(departments_url, deptos_tmp),
-            )
-
-            self.logger.info("Simplifying layers ...")
-            simplify_tasks = []
-            for level, tolerance in levels.items():
-                simplify_tasks.append(
-                    self.processor.simplify(
-                        country_tmp,
-                        os.path.join(
-                            data_dir,
-                            IGeoLayerProcessor.tolerance_versioned_key(
-                                f"pais_simple_L{level}.geojson", tolerance
-                            ),
-                        ),
-                        tolerance,
-                    )
-                )
-                simplify_tasks.append(
-                    self.processor.simplify(
-                        deptos_tmp,
-                        os.path.join(
-                            data_dir,
-                            IGeoLayerProcessor.tolerance_versioned_key(
-                                f"departamentos_simple_L{level}.geojson", tolerance
-                            ),
-                        ),
-                        tolerance,
-                    )
-                )
-            await asyncio.gather(*simplify_tasks)
-
-            self.logger.info("Converting layers to FlatGeobuf ...")
-            country_fgb = os.path.join(
-                data_dir, IGeoLayerProcessor.versioned_key("pais.fgb")
-            )
-            deptos_fgb = os.path.join(
-                data_dir, IGeoLayerProcessor.versioned_key("departamentos.fgb")
-            )
-            await asyncio.gather(
-                self.processor.convert_to_fgb(country_tmp, country_fgb),
-                self.processor.convert_to_fgb(deptos_tmp, deptos_fgb),
-            )
-
-            self.logger.info("Removing temporary raw files ...")
-            os.remove(country_tmp)
-            os.remove(deptos_tmp)
-
+            await self._download_layers(country_tmp, deptos_tmp)
+            await self._simplify_layers(country_tmp, deptos_tmp)
+            await self._convert_to_fgb_layers(country_tmp, deptos_tmp)
+            self._cleanup_tmp(country_tmp, deptos_tmp)
             self.logger.info("Uploading layers to S3 ...")
             updated_files = await self._upload_files(data_dir)
-
             duration = time.monotonic() - start
             self.logger.info(f"Layer refresh completed in {duration:.1f}s")
             return LayerRefreshResult(

@@ -22,9 +22,6 @@ class Settings:  # pylint: disable=too-many-instance-attributes,too-few-public-m
     s3_bucket_name: str = ""
     s3_secure: bool = True
 
-    # Scheduler
-    layer_update_cron: str = "0 3 * * 0"
-
     # Settings file
     settings_file: str = "settings.json"
     simplification_levels: dict = {}
@@ -54,6 +51,7 @@ class Settings:  # pylint: disable=too-many-instance-attributes,too-few-public-m
             raise FileNotFoundError(
                 f"Settings file not found: {self.settings_file}"
             ) from exc
+        self.layer_update_cron = data.get("layer_update_cron", "0 3 * * 0")
         raw = data.get("simplification_levels", {})
         self.simplification_levels = {int(k): float(v) for k, v in raw.items()}
 
@@ -72,7 +70,6 @@ class Settings:  # pylint: disable=too-many-instance-attributes,too-few-public-m
         )
 
         self.settings_file = os.getenv("SETTINGS_FILE", self.settings_file)
-        self.layer_update_cron = os.getenv("LAYER_UPDATE_CRON", self.layer_update_cron)
 
         self.data_dir = os.getenv("DATA_DIR", self.data_dir)
         self.country_geojson_url = os.getenv(
