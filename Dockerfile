@@ -32,7 +32,7 @@ COPY --from=builder /usr/local/bin /usr/local/bin
 COPY ./src /app
 
 # Copy settings file
-COPY settings.json /app/settings.json
+COPY settings.json /config/settings.json
 
 # Copy entrypoint script
 COPY entrypoint.sh /entrypoint.sh

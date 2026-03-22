@@ -2,6 +2,7 @@
 
 import json
 import os
+from logging import Logger
 
 from dotenv import load_dotenv
 
@@ -80,6 +81,25 @@ class Settings:  # pylint: disable=too-many-instance-attributes,too-few-public-m
         self.departments_geojson_url = os.getenv(
             "DEPARTMENTS_GEOJSON_URL", self.departments_geojson_url
         )
+
+    def log_config(self, logger: Logger) -> None:
+        """Log all non-secret configuration values."""
+        logger.info("=== Configuration ===")
+        logger.info("LOG_LEVEL: %s", self.log_level)
+        logger.info("APP_ENV: %s", self.app_env)
+        logger.info("SETTINGS_FILE: %s", self.settings_file)
+        logger.info("DATA_DIR: %s", self.data_dir)
+        logger.info("COUNTRY_GEOJSON_URL: %s", self.country_geojson_url)
+        logger.info("DEPARTMENTS_GEOJSON_URL: %s", self.departments_geojson_url)
+        logger.info("LAYER_UPDATE_CRON: %s", self.layer_update_cron)
+
+        for level, tolerance in self.simplification_levels.items():
+            logger.info("SIMPLIFICATION_LEVEL_%s: %s", level, tolerance)
+
+        logger.info("S3_ENDPOINT: %s", self.s3_endpoint)
+        logger.info("S3_BUCKET_NAME: %s", self.s3_bucket_name)
+        logger.info("S3_SECURE: %s", self.s3_secure)
+        logger.info("=====================")
 
     @staticmethod
     def get_settings() -> "Settings":

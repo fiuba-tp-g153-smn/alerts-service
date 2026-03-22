@@ -32,6 +32,7 @@ services:
       - LOG_LEVEL=${LOG_LEVEL}
       - APP_ENV=${APP_ENV}
       - OGR_GEOJSON_MAX_OBJ_SIZE=0
+      - SETTINGS_FILE=${SETTINGS_FILE}
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')"]
       interval: 30s
