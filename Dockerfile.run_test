@@ -21,6 +21,9 @@ RUN (poetry check --lock || poetry lock) && poetry install --no-root --no-ansi
 # Copy the rest of the project files (source code, tests, configs, etc.)
 COPY . .
 
+# Copy settings file
+COPY settings.json /config/settings.json
+
 # Run pytest with:
 # -s                : show stdout output directly
 # -m "not skip"     : skip tests marked @pytest.mark.skip

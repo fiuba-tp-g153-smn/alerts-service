@@ -47,6 +47,6 @@ ENTRYPOINT ["/entrypoint.sh"]
 # - "main:app" : entrypoint -> file main.py, ASGI app instance "app"
 # - host=0.0.0.0 : bind to all network interfaces (needed in containers)
 # - port=8080 : matches EXPOSE above
-HEALTHCHECK --interval=30s --timeout=10s --retries=3 --start-period=5m --start-interval=10s CMD python -c 'import urllib.request; urllib.request.urlopen("http://localhost:8080/health")'
+HEALTHCHECK --interval=30s --timeout=10s --retries=3 --start-period=8m --start-interval=10s CMD python -c 'import urllib.request; urllib.request.urlopen("http://localhost:8080/health")'
 
 CMD ["uvicorn", "main:app", "--host=0.0.0.0", "--port", "8080"]

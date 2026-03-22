@@ -12,3 +12,6 @@ env
 .git
 .venv
 .gitignore
+.mypy_cache
+.pytest_cache
+data/
