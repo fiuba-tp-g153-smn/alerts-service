@@ -72,3 +72,4 @@ tests/departments_*.json
 tests/departments_*.geojson
 
 .claude
+.mypy_cache
