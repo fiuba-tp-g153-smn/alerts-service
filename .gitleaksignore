@@ -1,0 +1,2 @@
+# False positive: file name pattern matched generic-api-key rule
+9e258191095455eb3e6ee7c821d626c60cfdba22:tests/unit/test_layer_refresh_service.py:generic-api-key:96
