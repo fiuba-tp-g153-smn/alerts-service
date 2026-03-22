@@ -6,9 +6,22 @@ Output: exits 0 on success, 1 on error (errors printed to stderr).
 """
 
 import json
+import os
 import sys
 
 import geopandas as gpd
+
+
+def _write_atomic(gdf, out_path: str, driver: str) -> None:
+    """Write gdf to a .tmp sidecar then atomically rename to out_path."""
+    tmp = out_path + ".tmp"
+    try:
+        gdf.to_file(tmp, driver=driver)
+        os.replace(tmp, out_path)
+    except:  # pylint: disable=bare-except
+        if os.path.exists(tmp):
+            os.remove(tmp)
+        raise
 
 
 def main():
@@ -23,9 +36,9 @@ def main():
             gdf["geometry"] = gdf["geometry"].simplify(
                 tolerance, preserve_topology=True
             )
-            gdf.to_file(out_path, driver="GeoJSON")
+            _write_atomic(gdf, out_path, "GeoJSON")
         elif op == "convert_fgb":
-            gdf.to_file(out_path, driver="FlatGeobuf")
+            _write_atomic(gdf, out_path, "FlatGeobuf")
         else:
             print(f"Unknown op: {op}", file=sys.stderr)
             sys.exit(1)

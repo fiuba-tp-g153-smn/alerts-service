@@ -87,26 +87,31 @@ class GeoLayerSyncService:  # pylint: disable=too-few-public-methods
             url = getattr(self.settings, layer["url_attr"])
             raw_tmp = os.path.join(data_dir, layer["raw_tmp"])
 
-            await self.processor.download(url, raw_tmp)
+            try:
+                await self.processor.download(url, raw_tmp)
 
-            for level, tolerance in missing_levels:
-                stem = f"{layer['simplified_stem']}_L{level}"
-                versioned = IGeoLayerProcessor.tolerance_versioned_key(
-                    f"{stem}.geojson", tolerance
-                )
-                simplified_path = os.path.join(data_dir, versioned)
-                await self.processor.simplify(raw_tmp, simplified_path, tolerance)
-                if self.settings.s3_bucket_name:
-                    await self.storage.upload(simplified_path, versioned)
+                for level, tolerance in missing_levels:
+                    stem = f"{layer['simplified_stem']}_L{level}"
+                    versioned = IGeoLayerProcessor.tolerance_versioned_key(
+                        f"{stem}.geojson", tolerance
+                    )
+                    simplified_path = os.path.join(data_dir, versioned)
+                    await self.processor.simplify(raw_tmp, simplified_path, tolerance)
+                    if self.settings.s3_bucket_name:
+                        await self.storage.upload(simplified_path, versioned)
 
-            if fgb_needed:
-                fgb_key = IGeoLayerProcessor.versioned_key(f"{layer['fgb_stem']}.fgb")
-                fgb_path = os.path.join(data_dir, fgb_key)
-                await self.processor.convert_to_fgb(raw_tmp, fgb_path)
-                if self.settings.s3_bucket_name:
-                    await self.storage.upload(fgb_path, fgb_key)
+                if fgb_needed:
+                    fgb_key = IGeoLayerProcessor.versioned_key(
+                        f"{layer['fgb_stem']}.fgb"
+                    )
+                    fgb_path = os.path.join(data_dir, fgb_key)
+                    await self.processor.convert_to_fgb(raw_tmp, fgb_path)
+                    if self.settings.s3_bucket_name:
+                        await self.storage.upload(fgb_path, fgb_key)
 
-            os.remove(raw_tmp)
+            finally:
+                if os.path.exists(raw_tmp):
+                    os.remove(raw_tmp)
 
         self.logger.info("All geo layers are ready.")
 

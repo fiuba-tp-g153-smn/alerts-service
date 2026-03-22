@@ -166,7 +166,7 @@ async def test_run_failure_when_storage_upload_raises_returns_failed_result(
     assert "S3 upload failed" in result.error
 
 
-async def test_run_does_not_remove_temp_files_on_failure(
+async def test_run_removes_temp_files_on_failure(
     service, mock_processor, tmp_raw_files
 ):
     country_tmp, deptos_tmp = tmp_raw_files
@@ -174,8 +174,8 @@ async def test_run_does_not_remove_temp_files_on_failure(
 
     await service.run()
 
-    assert os.path.exists(country_tmp)
-    assert os.path.exists(deptos_tmp)
+    assert not os.path.exists(country_tmp)
+    assert not os.path.exists(deptos_tmp)
 
 
 async def test_run_records_duration_in_result(service, tmp_raw_files):

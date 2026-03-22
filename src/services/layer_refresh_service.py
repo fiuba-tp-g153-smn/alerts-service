@@ -96,8 +96,9 @@ class LayerRefreshService:  # pylint: disable=too-few-public-methods
 
     def _cleanup_tmp(self, country_tmp: str, deptos_tmp: str) -> None:
         self.logger.info("Removing temporary raw files ...")
-        os.remove(country_tmp)
-        os.remove(deptos_tmp)
+        for path in (country_tmp, deptos_tmp):
+            if os.path.exists(path):
+                os.remove(path)
 
     async def run(self) -> LayerRefreshResult:
         """Execute the full refresh cycle and return a result with status and timing."""
@@ -111,7 +112,6 @@ class LayerRefreshService:  # pylint: disable=too-few-public-methods
             await self._download_layers(country_tmp, deptos_tmp)
             await self._simplify_layers(country_tmp, deptos_tmp)
             await self._convert_to_fgb_layers(country_tmp, deptos_tmp)
-            self._cleanup_tmp(country_tmp, deptos_tmp)
             self.logger.info("Uploading layers to S3 ...")
             updated_files = await self._upload_files(data_dir)
             duration = time.monotonic() - start
@@ -132,3 +132,6 @@ class LayerRefreshService:  # pylint: disable=too-few-public-methods
                 duration_seconds=duration,
                 error=str(exc),
             )
+
+        finally:
+            self._cleanup_tmp(country_tmp, deptos_tmp)

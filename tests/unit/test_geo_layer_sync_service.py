@@ -1,5 +1,6 @@
 """Tests for GeoLayerSyncService — local ↔ S3 consistency and stale file cleanup."""
 
+import os
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
@@ -281,3 +282,56 @@ async def test_reconcile_simplified_skips_s3_when_no_bucket(
 
     mock_storage.list_keys.assert_not_called()
     mock_storage.upload.assert_not_called()
+
+
+# ── regenerate cleanup ────────────────────────────────────────────────────────
+
+
+async def test_regenerate_removes_raw_tmp_on_success(
+    service, mock_settings, mock_processor, tmp_path
+):
+    raw_tmp = tmp_path / "pais_raw_tmp.geojson"
+    layer = {
+        "simplified_stem": "pais_simple",
+        "fgb_stem": "pais",
+        "url_attr": "country_geojson_url",
+        "raw_tmp": "pais_raw_tmp.geojson",
+    }
+    mock_settings.country_geojson_url = "http://example.com/country.geojson"
+    mock_settings.s3_bucket_name = ""
+
+    async def fake_download(url, path):
+        Path(path).touch()
+
+    mock_processor.download.side_effect = fake_download
+    service._needs_regen = [(layer, [(1, 0.001)], False)]
+
+    await service.regenerate()
+
+    assert not raw_tmp.exists()
+
+
+async def test_regenerate_removes_raw_tmp_on_processor_failure(
+    service, mock_settings, mock_processor, tmp_path
+):
+    raw_tmp = tmp_path / "pais_raw_tmp.geojson"
+    layer = {
+        "simplified_stem": "pais_simple",
+        "fgb_stem": "pais",
+        "url_attr": "country_geojson_url",
+        "raw_tmp": "pais_raw_tmp.geojson",
+    }
+    mock_settings.country_geojson_url = "http://example.com/country.geojson"
+    mock_settings.s3_bucket_name = ""
+
+    async def fake_download(url, path):
+        Path(path).touch()
+
+    mock_processor.download.side_effect = fake_download
+    mock_processor.simplify.side_effect = RuntimeError("simplify failed")
+    service._needs_regen = [(layer, [(1, 0.001)], False)]
+
+    with pytest.raises(RuntimeError, match="simplify failed"):
+        await service.regenerate()
+
+    assert not raw_tmp.exists()
