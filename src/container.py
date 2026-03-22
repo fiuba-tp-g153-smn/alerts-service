@@ -37,7 +37,8 @@ def get_intersection_service(
     logger: Logger = Depends(get_logger),
 ) -> GeoIntersectionService:
     """Return the geo intersection service."""
-    return GeoIntersectionService(repo, logger)
+    settings = get_settings()
+    return GeoIntersectionService(repo, logger, settings.simplification_levels)
 
 
 @lru_cache

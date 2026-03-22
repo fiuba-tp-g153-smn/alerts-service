@@ -75,7 +75,7 @@ def test_intersect_country_200(app_client, mock_service):
 
     assert response.status_code == 200
     assert response.json()["type"] == "FeatureCollection"
-    mock_service.intersect_country.assert_called_once_with(_VALID_POLYGON, True)
+    mock_service.intersect_country.assert_called_once_with(_VALID_POLYGON, 0)
 
 
 def test_intersect_country_accepts_feature_wrapper(app_client, mock_service):
@@ -118,7 +118,7 @@ def test_intersect_country_feature_collection_with_multiple_features_uses_first(
     assert called_geometry == _VALID_POLYGON
 
 
-def test_intersect_country_use_simplified_true_by_default(app_client, mock_service):
+def test_intersect_country_default_level_is_zero(app_client, mock_service):
     mock_service.intersect_country.return_value = {
         "type": "FeatureCollection",
         "features": [],
@@ -126,20 +126,48 @@ def test_intersect_country_use_simplified_true_by_default(app_client, mock_servi
 
     app_client.post("/intersect/country", json=_VALID_POLYGON)
 
-    assert mock_service.intersect_country.call_args.args[1] is True
+    assert mock_service.intersect_country.call_args.args[1] == 0
 
 
-def test_intersect_country_use_simplified_false_calls_service_with_false(
-    app_client, mock_service
-):
+def test_intersect_country_level_param_forwarded_to_service(app_client, mock_service):
     mock_service.intersect_country.return_value = {
         "type": "FeatureCollection",
         "features": [],
     }
 
-    app_client.post("/intersect/country?use_simplified=false", json=_VALID_POLYGON)
+    app_client.post("/intersect/country?simplification_level=5", json=_VALID_POLYGON)
 
-    assert mock_service.intersect_country.call_args.args[1] is False
+    assert mock_service.intersect_country.call_args.args[1] == 5
+
+
+def test_intersect_country_simplification_level_10_accepted(app_client, mock_service):
+    mock_service.intersect_country.return_value = {
+        "type": "FeatureCollection",
+        "features": [],
+    }
+
+    response = app_client.post(
+        "/intersect/country?simplification_level=10", json=_VALID_POLYGON
+    )
+
+    assert response.status_code == 200
+    assert mock_service.intersect_country.call_args.args[1] == 10
+
+
+def test_intersect_country_simplification_level_11_returns_422(app_client):
+    response = app_client.post(
+        "/intersect/country?simplification_level=11", json=_VALID_POLYGON
+    )
+
+    assert response.status_code == 422
+
+
+def test_intersect_country_simplification_level_negative_returns_422(app_client):
+    response = app_client.post(
+        "/intersect/country?simplification_level=-1", json=_VALID_POLYGON
+    )
+
+    assert response.status_code == 422
 
 
 def test_intersect_country_missing_type_422(app_client):
@@ -198,22 +226,53 @@ def test_intersect_departments_200(app_client, mock_service):
     assert body["departments"][0]["properties"]["nombre"] == "Dep1"
 
 
-def test_intersect_departments_use_simplified_true_by_default(app_client, mock_service):
+def test_intersect_departments_default_level_is_zero(app_client, mock_service):
     mock_service.intersect_departments.return_value = []
 
     app_client.post("/intersect/departments", json=_VALID_POLYGON)
 
-    assert mock_service.intersect_departments.call_args.args[1] is True
+    assert mock_service.intersect_departments.call_args.args[1] == 0
 
 
-def test_intersect_departments_use_simplified_false_calls_service_with_false(
+def test_intersect_departments_level_param_forwarded_to_service(
     app_client, mock_service
 ):
     mock_service.intersect_departments.return_value = []
 
-    app_client.post("/intersect/departments?use_simplified=false", json=_VALID_POLYGON)
+    app_client.post(
+        "/intersect/departments?simplification_level=3", json=_VALID_POLYGON
+    )
 
-    assert mock_service.intersect_departments.call_args.args[1] is False
+    assert mock_service.intersect_departments.call_args.args[1] == 3
+
+
+def test_intersect_departments_simplification_level_10_accepted(
+    app_client, mock_service
+):
+    mock_service.intersect_departments.return_value = []
+
+    response = app_client.post(
+        "/intersect/departments?simplification_level=10", json=_VALID_POLYGON
+    )
+
+    assert response.status_code == 200
+    assert mock_service.intersect_departments.call_args.args[1] == 10
+
+
+def test_intersect_departments_simplification_level_11_returns_422(app_client):
+    response = app_client.post(
+        "/intersect/departments?simplification_level=11", json=_VALID_POLYGON
+    )
+
+    assert response.status_code == 422
+
+
+def test_intersect_departments_simplification_level_negative_returns_422(app_client):
+    response = app_client.post(
+        "/intersect/departments?simplification_level=-1", json=_VALID_POLYGON
+    )
+
+    assert response.status_code == 422
 
 
 def test_intersect_departments_layer_not_found_500(app_client, mock_service):

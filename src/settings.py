@@ -1,5 +1,6 @@
 """Application configuration via environment variables."""
 
+import json
 import os
 
 from dotenv import load_dotenv
@@ -23,6 +24,10 @@ class Settings:  # pylint: disable=too-many-instance-attributes,too-few-public-m
     # Scheduler
     layer_update_cron: str = "0 3 * * 0"
 
+    # Settings file
+    settings_file: str = "settings.json"
+    simplification_levels: dict = {}
+
     # Geospatial
     data_dir: str = "/app/data"
     simplify_tolerance: float = 0.01
@@ -39,6 +44,18 @@ class Settings:  # pylint: disable=too-many-instance-attributes,too-few-public-m
 
     def __init__(self):
         self._load_from_env()
+        self._load_from_file()
+
+    def _load_from_file(self) -> None:
+        try:
+            with open(self.settings_file, encoding="utf-8") as f:
+                data = json.load(f)
+        except FileNotFoundError as exc:
+            raise FileNotFoundError(
+                f"Settings file not found: {self.settings_file}"
+            ) from exc
+        raw = data.get("simplification_levels", {})
+        self.simplification_levels = {int(k): float(v) for k, v in raw.items()}
 
     def _load_from_env(self) -> None:
         self.log_level = os.getenv("LOG_LEVEL", self.log_level)
@@ -54,6 +71,7 @@ class Settings:  # pylint: disable=too-many-instance-attributes,too-few-public-m
             "no",
         )
 
+        self.settings_file = os.getenv("SETTINGS_FILE", self.settings_file)
         self.layer_update_cron = os.getenv("LAYER_UPDATE_CRON", self.layer_update_cron)
 
         self.data_dir = os.getenv("DATA_DIR", self.data_dir)

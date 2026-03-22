@@ -31,6 +31,9 @@ COPY --from=builder /usr/local/bin /usr/local/bin
 # Copy the actual application code into /app
 COPY ./src /app
 
+# Copy settings file
+COPY settings.json /app/settings.json
+
 # Copy entrypoint script
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh

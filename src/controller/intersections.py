@@ -20,8 +20,11 @@ router = APIRouter(prefix="/intersect", tags=["Geo Intersection"])
 )
 async def intersect_country(
     geojson: GeoJSONInput,
-    use_simplified: bool = Query(
-        True, description="Use simplified geometries (faster, lower detail)"
+    simplification_level: int = Query(
+        0,
+        ge=0,
+        le=10,
+        description="0 = full resolution, 1-10 = simplified layer with increasing result tolerance",
     ),
     service: GeoIntersectionService = Depends(get_intersection_service),
     logger=Depends(get_logger),
@@ -36,13 +39,14 @@ async def intersect_country(
     try:
         geometry = geojson.extract_geometry()
         logger.info(
-            f"intersect_country: processing (simplified={use_simplified},"
+            f"intersect_country: processing (simplification_level={simplification_level},"
             f" type={geometry.get('type')})"
         )
-        result = await service.intersect_country(geometry, use_simplified)
+        result = await service.intersect_country(geometry, simplification_level)
         elapsed = time.time() - start_time
         logger.info(
-            f"intersect_country: done (simplified={use_simplified}) in {elapsed:.3f}s"
+            f"intersect_country: done (simplification_level={simplification_level})"
+            f" in {elapsed:.3f}s"
         )
         return JSONResponse(content=result)
     except FileNotFoundError as e:
@@ -63,8 +67,11 @@ async def intersect_country(
 )
 async def intersect_departments(
     geojson: GeoJSONInput,
-    use_simplified: bool = Query(
-        True, description="Use simplified geometries (faster, lower detail)"
+    simplification_level: int = Query(
+        0,
+        ge=0,
+        le=10,
+        description="0 = full resolution, 1–10 = simplified layer with increasing result tolerance",
     ),
     service: GeoIntersectionService = Depends(get_intersection_service),
     logger=Depends(get_logger),
@@ -81,13 +88,13 @@ async def intersect_departments(
     try:
         geometry = geojson.extract_geometry()
         logger.info(
-            f"intersect_departments: processing (simplified={use_simplified},"
+            f"intersect_departments: processing (simplification_level={simplification_level},"
             f" type={geometry.get('type')})"
         )
-        features = await service.intersect_departments(geometry, use_simplified)
+        features = await service.intersect_departments(geometry, simplification_level)
         elapsed = time.time() - start_time
         logger.info(
-            f"intersect_departments: done (simplified={use_simplified})"
+            f"intersect_departments: done (simplification_level={simplification_level})"
             f" in {elapsed:.3f}s, {len(features)} departments"
         )
         return {"departments": features}

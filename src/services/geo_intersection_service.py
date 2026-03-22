@@ -30,10 +30,27 @@ class GeoIntersectionService:
         self,
         repo: IGeoLayerRepository,
         logger: Logger,
+        simplification_levels: dict[int, float],
     ):
-        """Initialise with a geo layer repository and a logger."""
+        """Initialise with a geo layer repository, logger, and tolerance map."""
         self.repo = repo
         self.logger = logger
+        self._simplification_levels = simplification_levels
+
+    def _tolerance_for_level(self, level: int) -> float:
+        """Return the query-time simplification tolerance for the given level.
+
+        Falls back to the middle level's tolerance when the level is not found.
+        """
+        if level in self._simplification_levels:
+            return self._simplification_levels[level]
+
+        if self._simplification_levels:
+            sorted_levels = sorted(self._simplification_levels)
+            middle = sorted_levels[len(sorted_levels) // 2]
+            return self._simplification_levels[middle]
+
+        return 0.0
 
     async def _run_fullres_subprocess(
         self, task: str, geom, layer_path: str, bbox: tuple | None = None
@@ -87,76 +104,91 @@ class GeoIntersectionService:
 
         return output["results"]["req"]
 
-    async def intersect_country(self, geometry_dict: dict, simplified: bool) -> dict:
+    async def _run_fullres(
+        self, task: str, layer_type: LayerType, input_geom, bbox: tuple | None = None
+    ) -> dict:
+        """Resolve the layer path and run the fullres subprocess, returning the raw result."""
+        t0 = time.time()
+        try:
+            layer_path = self.repo.get_fullres_fgb_path(layer_type)
+        except FileNotFoundError:
+            layer_path = self.repo.get_layer_path(layer_type, simplified=False)
+        result = await self._run_fullres_subprocess(
+            task, input_geom, layer_path, bbox=bbox
+        )
+        self.logger.info(
+            f"intersect_{task} (fullres subprocess): {time.time()-t0:.3f}s"
+        )
+        return result
+
+    def _apply_tolerance(self, geoseries, tolerance: float):
+        """Return a simplified copy of the GeoSeries if tolerance > 0, otherwise as-is."""
+        if tolerance > 0.0:
+            return geoseries.simplify(tolerance, preserve_topology=True)
+        return geoseries
+
+    async def intersect_country(
+        self, geometry_dict: dict, simplification_level: int
+    ) -> dict:
         """Return a GeoJSON FeatureCollection of the intersection with Argentina."""
         input_geom = shape(geometry_dict)
 
-        if not simplified:
-            t0 = time.time()
-            try:
-                layer_path = self.repo.get_fullres_fgb_path(LayerType.COUNTRY)
-            except FileNotFoundError:
-                layer_path = self.repo.get_layer_path(
-                    LayerType.COUNTRY, simplified=False
-                )
-            result = await self._run_fullres_subprocess(
-                "country", input_geom, layer_path, bbox=None
-            )
-            self.logger.info(
-                f"intersect_country (fullres subprocess): {time.time()-t0:.3f}s"
-            )
-            return result
+        if simplification_level == 0:
+            return await self._run_fullres("country", LayerType.COUNTRY, input_geom)
 
         t0 = time.time()
-        gdf = self.repo.get_layer(LayerType.COUNTRY, simplified)
+        gdf = self.repo.get_layer(LayerType.COUNTRY, True)
         self.logger.info(f"intersect_country: load={time.time()-t0:.3f}s")
 
         t0 = time.time()
-        matching = gdf[gdf.intersects(input_geom)]
-        intersection = matching.intersection(input_geom)
+        tolerance = self._tolerance_for_level(simplification_level)
+        intersection = self._apply_tolerance(
+            gdf[gdf.intersects(input_geom)].intersection(input_geom), tolerance
+        )
         self.logger.info(f"intersect_country: intersect={time.time()-t0:.3f}s")
 
         t0 = time.time()
         result = json.loads(intersection.to_json())
-        self.logger.info(f"intersect_country: serialize={time.time()-t0:.3f}s")
-
+        self.logger.info(
+            f"intersect_country: serialize={time.time()-t0:.3f}s"
+            f" (simplification_level={simplification_level})"
+        )
         return result
 
     async def intersect_departments(
-        self, geometry_dict: dict, simplified: bool
+        self, geometry_dict: dict, simplification_level: int
     ) -> list[dict]:
         """Return departments intersecting the input geometry with their intersection shapes."""
         input_geom = shape(geometry_dict)
 
-        if not simplified:
-            t0 = time.time()
-            try:
-                layer_path = self.repo.get_fullres_fgb_path(LayerType.DEPARTMENTS)
-            except FileNotFoundError:
-                layer_path = self.repo.get_layer_path(
-                    LayerType.DEPARTMENTS, simplified=False
-                )
-            bbox = tuple(input_geom.bounds)
-            output = await self._run_fullres_subprocess(
-                "departments", input_geom, layer_path, bbox=bbox
-            )
-            self.logger.info(
-                f"intersect_departments (fullres subprocess): {time.time()-t0:.3f}s"
+        if simplification_level == 0:
+            output = await self._run_fullres(
+                "departments",
+                LayerType.DEPARTMENTS,
+                input_geom,
+                bbox=tuple(input_geom.bounds),
             )
             return output["features"]
 
         t0 = time.time()
-        gdf = self.repo.get_layer(LayerType.DEPARTMENTS, simplified)
+        gdf = self.repo.get_layer(LayerType.DEPARTMENTS, True)
         self.logger.info(f"intersect_departments: load={time.time()-t0:.3f}s")
 
         t0 = time.time()
-        mask = gdf.intersects(input_geom)
-        intersecting = gdf[mask].copy()
-        intersecting["intersection"] = intersecting["geometry"].intersection(input_geom)
+        tolerance = self._tolerance_for_level(simplification_level)
+        intersecting = gdf[gdf.intersects(input_geom)].copy()
+        intersecting["intersection"] = self._apply_tolerance(
+            intersecting["geometry"].intersection(input_geom), tolerance
+        )
+        intersecting["geometry"] = self._apply_tolerance(
+            intersecting["geometry"], tolerance
+        )
         self.logger.info(f"intersect_departments: intersect={time.time()-t0:.3f}s")
 
         t0 = time.time()
         features = build_department_features(intersecting)
-        self.logger.info(f"intersect_departments: serialize={time.time()-t0:.3f}s")
-
+        self.logger.info(
+            f"intersect_departments: serialize={time.time()-t0:.3f}s"
+            f" (simplification_level={simplification_level})"
+        )
         return features
