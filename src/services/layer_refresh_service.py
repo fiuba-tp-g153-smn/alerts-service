@@ -7,15 +7,8 @@ from logging import Logger
 from typing import TYPE_CHECKING
 
 from domain.models import LayerRefreshResult
+from ports.geo_layer_processor import IGeoLayerProcessor
 from ports.object_storage import IObjectStorage
-from scheduler.layer_refresh_job import (
-    _convert_to_fgb,
-    _download,
-    _simplify,
-    _tolerance_str,
-    _tolerance_versioned_key,
-    _versioned_key,
-)
 
 if TYPE_CHECKING:
     from settings import Settings
@@ -26,17 +19,24 @@ _FGB_FILES = ["pais.fgb", "departamentos.fgb"]
 class LayerRefreshService:  # pylint: disable=too-few-public-methods
     """Orchestrates a full layer refresh: download from IGN, simplify, and sync to S3."""
 
-    def __init__(self, settings: "Settings", storage: IObjectStorage, logger: Logger):
+    def __init__(
+        self,
+        settings: "Settings",
+        storage: IObjectStorage,
+        processor: IGeoLayerProcessor,
+        logger: Logger,
+    ):
         """Initialise with application settings, an object storage client, and a logger."""
         self.settings = settings
         self.storage = storage
+        self.processor = processor
         self.logger = logger
 
     def _simplified_fnames(self) -> list[str]:
         """Return simplified GeoJSON filenames (with tolerance) for all configured levels."""
         fnames = []
         for level, tolerance in self.settings.simplification_levels.items():
-            tol = _tolerance_str(tolerance)
+            tol = IGeoLayerProcessor.tolerance_str(tolerance)
             fnames.append(f"pais_simple_L{level}_T{tol}.geojson")
             fnames.append(f"departamentos_simple_L{level}_T{tol}.geojson")
         return fnames
@@ -45,12 +45,12 @@ class LayerRefreshService:  # pylint: disable=too-few-public-methods
         """Delete old S3 keys for each level and upload the current versioned files."""
         uploaded: list[str] = []
         for fname in self._simplified_fnames() + _FGB_FILES:
-            local = os.path.join(data_dir, _versioned_key(fname))
+            new_key = IGeoLayerProcessor.versioned_key(fname)
+            local = os.path.join(data_dir, new_key)
             # Use level-only prefix (strip _T{tol} suffix) to sweep old-tolerance S3 keys
             level_stem = os.path.splitext(fname)[0].split("_T")[0]
             for key in await self.storage.list_keys(f"{level_stem}_"):
                 await self.storage.delete(key)
-            new_key = _versioned_key(fname)
             await self.storage.upload(local, new_key)
             uploaded.append(new_key)
         return uploaded
@@ -71,47 +71,49 @@ class LayerRefreshService:  # pylint: disable=too-few-public-methods
         try:
             self.logger.info("Starting layer refresh: downloading from IGN ...")
             await asyncio.gather(
-                _download(country_url, country_tmp, self.logger),
-                _download(departments_url, deptos_tmp, self.logger),
+                self.processor.download(country_url, country_tmp),
+                self.processor.download(departments_url, deptos_tmp),
             )
 
             self.logger.info("Simplifying layers ...")
             simplify_tasks = []
             for level, tolerance in levels.items():
                 simplify_tasks.append(
-                    _simplify(
+                    self.processor.simplify(
                         country_tmp,
                         os.path.join(
                             data_dir,
-                            _tolerance_versioned_key(
+                            IGeoLayerProcessor.tolerance_versioned_key(
                                 f"pais_simple_L{level}.geojson", tolerance
                             ),
                         ),
                         tolerance,
-                        self.logger,
                     )
                 )
                 simplify_tasks.append(
-                    _simplify(
+                    self.processor.simplify(
                         deptos_tmp,
                         os.path.join(
                             data_dir,
-                            _tolerance_versioned_key(
+                            IGeoLayerProcessor.tolerance_versioned_key(
                                 f"departamentos_simple_L{level}.geojson", tolerance
                             ),
                         ),
                         tolerance,
-                        self.logger,
                     )
                 )
             await asyncio.gather(*simplify_tasks)
 
             self.logger.info("Converting layers to FlatGeobuf ...")
-            country_fgb = os.path.join(data_dir, _versioned_key("pais.fgb"))
-            deptos_fgb = os.path.join(data_dir, _versioned_key("departamentos.fgb"))
+            country_fgb = os.path.join(
+                data_dir, IGeoLayerProcessor.versioned_key("pais.fgb")
+            )
+            deptos_fgb = os.path.join(
+                data_dir, IGeoLayerProcessor.versioned_key("departamentos.fgb")
+            )
             await asyncio.gather(
-                _convert_to_fgb(country_tmp, country_fgb, self.logger),
-                _convert_to_fgb(deptos_tmp, deptos_fgb, self.logger),
+                self.processor.convert_to_fgb(country_tmp, country_fgb),
+                self.processor.convert_to_fgb(deptos_tmp, deptos_fgb),
             )
 
             self.logger.info("Removing temporary raw files ...")

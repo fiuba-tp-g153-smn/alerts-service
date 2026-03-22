@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from ports.geo_layer_processor import IGeoLayerProcessor
 from ports.object_storage import IObjectStorage
 from services.geo_layer_sync_service import GeoLayerSyncService
 
@@ -32,18 +33,26 @@ def mock_logger():
 
 
 @pytest.fixture
-def service(mock_settings, mock_storage, mock_logger):
-    return GeoLayerSyncService(mock_settings, mock_storage, mock_logger)
+def mock_processor():
+    return AsyncMock(spec=IGeoLayerProcessor)
+
+
+@pytest.fixture
+def service(mock_settings, mock_storage, mock_processor, mock_logger):
+    return GeoLayerSyncService(mock_settings, mock_storage, mock_processor, mock_logger)
 
 
 # ── ensure_all ────────────────────────────────────────────────────────────────
+
 
 async def test_ensure_all_returns_empty_when_all_files_present(
     service, mock_settings, tmp_path
 ):
     for level, tol_str in [(1, "0p001"), (2, "0p01")]:
         (tmp_path / f"pais_simple_L{level}_T{tol_str}_20260322.geojson").touch()
-        (tmp_path / f"departamentos_simple_L{level}_T{tol_str}_20260322.geojson").touch()
+        (
+            tmp_path / f"departamentos_simple_L{level}_T{tol_str}_20260322.geojson"
+        ).touch()
     (tmp_path / "pais_20260322.fgb").touch()
     (tmp_path / "departamentos_20260322.fgb").touch()
 
@@ -73,7 +82,9 @@ async def test_ensure_all_returns_layer_when_fgb_missing(
     # Simplified present, fgb missing
     for level, tol_str in [(1, "0p001"), (2, "0p01")]:
         (tmp_path / f"pais_simple_L{level}_T{tol_str}_20260322.geojson").touch()
-        (tmp_path / f"departamentos_simple_L{level}_T{tol_str}_20260322.geojson").touch()
+        (
+            tmp_path / f"departamentos_simple_L{level}_T{tol_str}_20260322.geojson"
+        ).touch()
 
     result = await service.ensure_all()
 
@@ -84,6 +95,7 @@ async def test_ensure_all_returns_layer_when_fgb_missing(
 
 
 # ── stale file cleanup ────────────────────────────────────────────────────────
+
 
 async def test_reconcile_simplified_purges_wrong_tolerance_local_file(
     service, mock_settings, tmp_path
@@ -125,9 +137,12 @@ async def test_reconcile_simplified_purges_stale_s3_keys(
     (tmp_path / "pais_simple_L1_T0p001_20260322.geojson").touch()
 
     mock_storage.list_keys.side_effect = lambda prefix: (
-        ["pais_simple_L1_T0p05_20240101.geojson",
-         "pais_simple_L1_T0p001_20260322.geojson"]
-        if "pais_simple_L1_" in prefix else []
+        [
+            "pais_simple_L1_T0p05_20240101.geojson",
+            "pais_simple_L1_T0p001_20260322.geojson",
+        ]
+        if "pais_simple_L1_" in prefix
+        else []
     )
 
     await service._reconcile_simplified(
@@ -141,12 +156,14 @@ async def test_reconcile_simplified_purges_stale_s3_keys(
 
 # ── download / upload sync ────────────────────────────────────────────────────
 
+
 async def test_reconcile_simplified_downloads_from_s3_when_local_missing(
     service, mock_settings, mock_storage, tmp_path
 ):
     mock_storage.list_keys.side_effect = lambda prefix: (
         ["pais_simple_L1_T0p001_20260322.geojson"]
-        if prefix == "pais_simple_L1_T0p001_" else []
+        if prefix == "pais_simple_L1_T0p001_"
+        else []
     )
     mock_storage.download.return_value = True
 
@@ -165,7 +182,8 @@ async def test_reconcile_simplified_returns_false_when_s3_download_fails(
 ):
     mock_storage.list_keys.side_effect = lambda prefix: (
         ["pais_simple_L1_T0p001_20260322.geojson"]
-        if prefix == "pais_simple_L1_T0p001_" else []
+        if prefix == "pais_simple_L1_T0p001_"
+        else []
     )
     mock_storage.download.return_value = False
 
@@ -211,6 +229,7 @@ async def test_reconcile_simplified_returns_false_when_nothing_exists(
 
 # ── FGB reconciliation ────────────────────────────────────────────────────────
 
+
 async def test_reconcile_fgb_returns_true_when_file_present(
     service, mock_settings, tmp_path
 ):
@@ -246,6 +265,7 @@ async def test_reconcile_fgb_purges_old_date_local_file(
 
 
 # ── no S3 configured ─────────────────────────────────────────────────────────
+
 
 async def test_reconcile_simplified_skips_s3_when_no_bucket(
     service, mock_settings, mock_storage, tmp_path
