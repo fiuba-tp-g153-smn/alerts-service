@@ -45,7 +45,7 @@ def _extract_date(key: str) -> str | None:
 async def _ensure_layers(settings, logger: Logger, storage: S3ObjectStorage) -> None:
     """Ensure all geo layers are present locally and in S3 via date-stamp reconciliation."""
     data_dir = settings.data_dir
-    tolerance = float(getattr(settings, "simplify_tolerance", 0.01))
+    levels: dict[int, float] = settings.simplification_levels
 
     def _local_date(stem: str, ext: str) -> str | None:
         matches = sorted(_glob.glob(os.path.join(data_dir, f"{stem}_????????{ext}")))
@@ -87,34 +87,41 @@ async def _ensure_layers(settings, logger: Logger, storage: S3ObjectStorage) -> 
         return True
 
     for layer in _LAYERS:
-        simplified_ok = await _reconcile_file(layer["simplified_stem"], ".geojson")
+        missing_levels: list[tuple[int, float]] = []
+        for level, tolerance in levels.items():
+            stem = f"{layer['simplified_stem']}_L{level}"
+            if not await _reconcile_file(stem, ".geojson"):
+                missing_levels.append((level, tolerance))
+
         fgb_ok = await _reconcile_file(layer["fgb_stem"], ".fgb")
 
-        if simplified_ok and fgb_ok:
+        if not missing_levels and fgb_ok:
             continue
 
         logger.info(f"Re-generating layer: {layer['fgb_stem']} ...")
         url = getattr(settings, layer["url_attr"])
         raw_tmp = os.path.join(data_dir, layer["raw_tmp"])
-        simplified_path = os.path.join(
-            data_dir, _versioned_key(f"{layer['simplified_stem']}.geojson")
-        )
-        fgb_path = os.path.join(data_dir, _versioned_key(f"{layer['fgb_stem']}.fgb"))
 
         await _download(url, raw_tmp, logger)
-        await _simplify(raw_tmp, simplified_path, tolerance, logger)
-        await _convert_to_fgb(raw_tmp, fgb_path, logger)
-        os.remove(raw_tmp)
 
-        if settings.s3_bucket_name:
-            await storage.upload(
-                simplified_path,
-                _versioned_key(f"{layer['simplified_stem']}.geojson"),
+        for level, tolerance in missing_levels:
+            stem = f"{layer['simplified_stem']}_L{level}"
+            simplified_path = os.path.join(data_dir, _versioned_key(f"{stem}.geojson"))
+            await _simplify(raw_tmp, simplified_path, tolerance, logger)
+            if settings.s3_bucket_name:
+                await storage.upload(simplified_path, _versioned_key(f"{stem}.geojson"))
+
+        if not fgb_ok:
+            fgb_path = os.path.join(
+                data_dir, _versioned_key(f"{layer['fgb_stem']}.fgb")
             )
-            await storage.upload(
-                fgb_path,
-                _versioned_key(f"{layer['fgb_stem']}.fgb"),
-            )
+            await _convert_to_fgb(raw_tmp, fgb_path, logger)
+            if settings.s3_bucket_name:
+                await storage.upload(
+                    fgb_path, _versioned_key(f"{layer['fgb_stem']}.fgb")
+                )
+
+        os.remove(raw_tmp)
 
     logger.info("All geo layers are ready.")
 

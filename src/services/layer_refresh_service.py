@@ -18,15 +18,7 @@ from scheduler.layer_refresh_job import (
 if TYPE_CHECKING:
     from settings import Settings
 
-GEOJSON_FILES = [
-    "pais_simple.geojson",
-    "departamentos_simple.geojson",
-]
-
-FGB_FILES = [
-    "pais.fgb",
-    "departamentos.fgb",
-]
+_FGB_FILES = ["pais.fgb", "departamentos.fgb"]
 
 
 class LayerRefreshService:  # pylint: disable=too-few-public-methods
@@ -38,10 +30,18 @@ class LayerRefreshService:  # pylint: disable=too-few-public-methods
         self.storage = storage
         self.logger = logger
 
+    def _simplified_fnames(self) -> list[str]:
+        """Return the list of simplified GeoJSON filenames for all configured levels."""
+        fnames = []
+        for level in self.settings.simplification_levels:
+            fnames.append(f"pais_simple_L{level}.geojson")
+            fnames.append(f"departamentos_simple_L{level}.geojson")
+        return fnames
+
     async def _upload_files(self, data_dir: str) -> list[str]:
         """Delete old S3 keys and upload the current versioned files; return uploaded key names."""
         uploaded: list[str] = []
-        for fname in GEOJSON_FILES + FGB_FILES:
+        for fname in self._simplified_fnames() + _FGB_FILES:
             local = os.path.join(data_dir, _versioned_key(fname))
             stem = os.path.splitext(fname)[0]
             for key in await self.storage.list_keys(f"{stem}_"):
@@ -56,19 +56,13 @@ class LayerRefreshService:  # pylint: disable=too-few-public-methods
         start = time.monotonic()
         data_dir = self.settings.data_dir
         os.makedirs(data_dir, exist_ok=True)
-        tolerance = float(getattr(self.settings, "simplify_tolerance", 0.01))
+        levels: dict[int, float] = self.settings.simplification_levels
 
         country_url = self.settings.country_geojson_url
         departments_url = self.settings.departments_geojson_url
 
         country_tmp = os.path.join(data_dir, "pais_raw_tmp.geojson")
-        country_simple_path = os.path.join(
-            data_dir, _versioned_key("pais_simple.geojson")
-        )
         deptos_tmp = os.path.join(data_dir, "departamentos_raw_tmp.geojson")
-        deptos_simple_path = os.path.join(
-            data_dir, _versioned_key("departamentos_simple.geojson")
-        )
 
         try:
             self.logger.info("Starting layer refresh: downloading from IGN ...")
@@ -78,10 +72,30 @@ class LayerRefreshService:  # pylint: disable=too-few-public-methods
             )
 
             self.logger.info("Simplifying layers ...")
-            await asyncio.gather(
-                _simplify(country_tmp, country_simple_path, tolerance, self.logger),
-                _simplify(deptos_tmp, deptos_simple_path, tolerance, self.logger),
-            )
+            simplify_tasks = []
+            for level, tolerance in levels.items():
+                simplify_tasks.append(
+                    _simplify(
+                        country_tmp,
+                        os.path.join(
+                            data_dir, _versioned_key(f"pais_simple_L{level}.geojson")
+                        ),
+                        tolerance,
+                        self.logger,
+                    )
+                )
+                simplify_tasks.append(
+                    _simplify(
+                        deptos_tmp,
+                        os.path.join(
+                            data_dir,
+                            _versioned_key(f"departamentos_simple_L{level}.geojson"),
+                        ),
+                        tolerance,
+                        self.logger,
+                    )
+                )
+            await asyncio.gather(*simplify_tasks)
 
             self.logger.info("Converting layers to FlatGeobuf ...")
             country_fgb = os.path.join(data_dir, _versioned_key("pais.fgb"))

@@ -30,27 +30,10 @@ class GeoIntersectionService:
         self,
         repo: IGeoLayerRepository,
         logger: Logger,
-        simplification_levels: dict[int, float],
     ):
-        """Initialise with a geo layer repository, logger, and tolerance map."""
+        """Initialise with a geo layer repository and a logger."""
         self.repo = repo
         self.logger = logger
-        self._simplification_levels = simplification_levels
-
-    def _tolerance_for_level(self, level: int) -> float:
-        """Return the query-time simplification tolerance for the given level.
-
-        Falls back to the middle level's tolerance when the level is not found.
-        """
-        if level in self._simplification_levels:
-            return self._simplification_levels[level]
-
-        if self._simplification_levels:
-            sorted_levels = sorted(self._simplification_levels)
-            middle = sorted_levels[len(sorted_levels) // 2]
-            return self._simplification_levels[middle]
-
-        return 0.0
 
     async def _run_fullres_subprocess(
         self, task: str, geom, layer_path: str, bbox: tuple | None = None
@@ -112,7 +95,7 @@ class GeoIntersectionService:
         try:
             layer_path = self.repo.get_fullres_fgb_path(layer_type)
         except FileNotFoundError:
-            layer_path = self.repo.get_layer_path(layer_type, simplified=False)
+            layer_path = self.repo.get_fullres_geojson_path(layer_type)
         result = await self._run_fullres_subprocess(
             task, input_geom, layer_path, bbox=bbox
         )
@@ -120,12 +103,6 @@ class GeoIntersectionService:
             f"intersect_{task} (fullres subprocess): {time.time()-t0:.3f}s"
         )
         return result
-
-    def _apply_tolerance(self, geoseries, tolerance: float):
-        """Return a simplified copy of the GeoSeries if tolerance > 0, otherwise as-is."""
-        if tolerance > 0.0:
-            return geoseries.simplify(tolerance, preserve_topology=True)
-        return geoseries
 
     async def intersect_country(
         self, geometry_dict: dict, simplification_level: int
@@ -137,14 +114,11 @@ class GeoIntersectionService:
             return await self._run_fullres("country", LayerType.COUNTRY, input_geom)
 
         t0 = time.time()
-        gdf = self.repo.get_layer(LayerType.COUNTRY, True)
+        gdf = self.repo.get_layer(LayerType.COUNTRY, simplification_level)
         self.logger.info(f"intersect_country: load={time.time()-t0:.3f}s")
 
         t0 = time.time()
-        tolerance = self._tolerance_for_level(simplification_level)
-        intersection = self._apply_tolerance(
-            gdf[gdf.intersects(input_geom)].intersection(input_geom), tolerance
-        )
+        intersection = gdf[gdf.intersects(input_geom)].intersection(input_geom)
         self.logger.info(f"intersect_country: intersect={time.time()-t0:.3f}s")
 
         t0 = time.time()
@@ -171,18 +145,12 @@ class GeoIntersectionService:
             return output["features"]
 
         t0 = time.time()
-        gdf = self.repo.get_layer(LayerType.DEPARTMENTS, True)
+        gdf = self.repo.get_layer(LayerType.DEPARTMENTS, simplification_level)
         self.logger.info(f"intersect_departments: load={time.time()-t0:.3f}s")
 
         t0 = time.time()
-        tolerance = self._tolerance_for_level(simplification_level)
         intersecting = gdf[gdf.intersects(input_geom)].copy()
-        intersecting["intersection"] = self._apply_tolerance(
-            intersecting["geometry"].intersection(input_geom), tolerance
-        )
-        intersecting["geometry"] = self._apply_tolerance(
-            intersecting["geometry"], tolerance
-        )
+        intersecting["intersection"] = intersecting["geometry"].intersection(input_geom)
         self.logger.info(f"intersect_departments: intersect={time.time()-t0:.3f}s")
 
         t0 = time.time()

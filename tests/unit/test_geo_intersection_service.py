@@ -8,8 +8,6 @@ from shapely.geometry import box, shape
 from domain.models import LayerType
 from services.geo_intersection_service import GeoIntersectionService
 
-_TEST_LEVELS = {1: 0.0, 2: 0.001, 5: 0.008, 6: 0.01, 10: 0.2}
-
 
 @pytest.fixture
 def mock_logger():
@@ -23,7 +21,7 @@ def mock_repo():
 
 @pytest.fixture
 def service(mock_repo, mock_logger):
-    return GeoIntersectionService(mock_repo, mock_logger, _TEST_LEVELS)
+    return GeoIntersectionService(mock_repo, mock_logger)
 
 
 @pytest.fixture
@@ -66,7 +64,7 @@ async def test_intersect_country_simplified_returns_feature_collection(
 
     result = await service.intersect_country(test_geometry, simplification_level=1)
 
-    mock_repo.get_layer.assert_called_once_with(LayerType.COUNTRY, True)
+    mock_repo.get_layer.assert_called_once_with(LayerType.COUNTRY, 1)
     assert result["type"] == "FeatureCollection"
     assert len(result["features"]) > 0
     assert result["features"][0]["geometry"]["type"] in (
@@ -76,16 +74,15 @@ async def test_intersect_country_simplified_returns_feature_collection(
     )
 
 
-async def test_intersect_country_simplified_passes_correct_simplified_flag_to_repo(
+async def test_intersect_country_simplified_passes_correct_level_to_repo(
     service, mock_repo, country_gdf, test_geometry
 ):
     mock_repo.get_layer.return_value = country_gdf
 
-    await service.intersect_country(test_geometry, simplification_level=1)
+    await service.intersect_country(test_geometry, simplification_level=3)
 
-    # Verify the flag is passed as True, not False
     call_args = mock_repo.get_layer.call_args
-    assert call_args.args == (LayerType.COUNTRY, True)
+    assert call_args.args == (LayerType.COUNTRY, 3)
 
 
 async def test_intersect_country_simplified_no_intersection(service, mock_repo):
@@ -111,40 +108,6 @@ async def test_intersect_country_simplified_no_intersection(service, mock_repo):
     assert result["features"] == []
 
 
-async def test_intersect_country_level_10_simplifies_result(
-    service, mock_repo, country_gdf, test_geometry
-):
-    mock_repo.get_layer.return_value = country_gdf
-
-    result_l1 = await service.intersect_country(test_geometry, simplification_level=1)
-    mock_repo.get_layer.reset_mock()
-    mock_repo.get_layer.return_value = country_gdf
-    result_l10 = await service.intersect_country(test_geometry, simplification_level=10)
-
-    def coord_count(feature_collection):
-        total = 0
-        for f in feature_collection.get("features", []):
-            coords = f.get("geometry", {}).get("coordinates", [])
-            for ring in coords:
-                total += len(ring)
-        return total
-
-    assert coord_count(result_l10) <= coord_count(result_l1)
-
-
-async def test_intersect_country_level_1_does_not_apply_extra_tolerance(
-    service, mock_repo, country_gdf, test_geometry
-):
-    # Level 1 has tolerance 0.0 — result should be unchanged by simplification
-    mock_repo.get_layer.return_value = country_gdf
-
-    result = await service.intersect_country(test_geometry, simplification_level=1)
-
-    # Verify result is a valid FeatureCollection (no error from simplify with tolerance=0)
-    assert result["type"] == "FeatureCollection"
-    assert len(result["features"]) > 0
-
-
 async def test_intersect_departments_simplified_filters_correctly(
     service, mock_repo, deptos_gdf, test_geometry
 ):
@@ -152,7 +115,7 @@ async def test_intersect_departments_simplified_filters_correctly(
 
     result = await service.intersect_departments(test_geometry, simplification_level=1)
 
-    mock_repo.get_layer.assert_called_once_with(LayerType.DEPARTMENTS, True)
+    mock_repo.get_layer.assert_called_once_with(LayerType.DEPARTMENTS, 1)
     assert len(result) == 1
     assert result[0]["properties"]["nombre"] == "Dep1"
     assert "geometry" in result[0]
@@ -216,31 +179,6 @@ async def test_intersect_departments_simplified_no_match(service, mock_repo):
     assert result == []
 
 
-async def test_intersect_departments_level_10_simplifies_geometry_and_intersection(
-    service, mock_repo, deptos_gdf
-):
-    wide_geometry = {
-        "type": "Polygon",
-        "coordinates": [
-            [
-                [-59.0, -35.0],
-                [-52.0, -35.0],
-                [-52.0, -25.0],
-                [-59.0, -25.0],
-                [-59.0, -35.0],
-            ]
-        ],
-    }
-    mock_repo.get_layer.return_value = deptos_gdf
-
-    result = await service.intersect_departments(wide_geometry, simplification_level=10)
-
-    assert len(result) == 2
-    for feature in result:
-        assert "geometry" in feature
-        assert "intersection" in feature
-
-
 async def test_intersect_country_invalid_geometry_raises(service, mock_repo):
     invalid_geometry = {"type": "Invalid", "coordinates": []}
     with pytest.raises(Exception):
@@ -296,16 +234,14 @@ async def test_intersect_country_fullres_falls_back_to_geojson_path_when_no_fgb(
     service, mock_repo, test_geometry
 ):
     mock_repo.get_fullres_fgb_path.side_effect = FileNotFoundError("no fgb file")
-    mock_repo.get_layer_path.return_value = "/fallback/pais_20240101.geojson"
+    mock_repo.get_fullres_geojson_path.return_value = "/fallback/pais_20240101.geojson"
     service._run_fullres_subprocess = AsyncMock(
         return_value={"type": "FeatureCollection", "features": []}
     )
 
     await service.intersect_country(test_geometry, simplification_level=0)
 
-    mock_repo.get_layer_path.assert_called_once_with(
-        LayerType.COUNTRY, simplified=False
-    )
+    mock_repo.get_fullres_geojson_path.assert_called_once_with(LayerType.COUNTRY)
     assert (
         service._run_fullres_subprocess.call_args.args[2]
         == "/fallback/pais_20240101.geojson"

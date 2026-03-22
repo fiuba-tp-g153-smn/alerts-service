@@ -30,7 +30,6 @@ class Settings:  # pylint: disable=too-many-instance-attributes,too-few-public-m
 
     # Geospatial
     data_dir: str = "/app/data"
-    simplify_tolerance: float = 0.01
     country_geojson_url: str = (
         "https://wms.ign.gob.ar/geoserver/ows"
         "?service=WFS&version=1.0.0&request=GetFeature"
@@ -75,9 +74,6 @@ class Settings:  # pylint: disable=too-many-instance-attributes,too-few-public-m
         self.layer_update_cron = os.getenv("LAYER_UPDATE_CRON", self.layer_update_cron)
 
         self.data_dir = os.getenv("DATA_DIR", self.data_dir)
-        self.simplify_tolerance = float(
-            os.getenv("SIMPLIFY_TOLERANCE", str(self.simplify_tolerance))
-        )
         self.country_geojson_url = os.getenv(
             "COUNTRY_GEOJSON_URL", self.country_geojson_url
         )

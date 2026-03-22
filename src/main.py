@@ -21,7 +21,7 @@ async def lifespan(_app: FastAPI):
 
     logger.info("Application startup: preloading simplified geo layers ...")
     geo_repo = get_geo_repo()
-    geo_repo.preload()
+    geo_repo.preload(list(settings.simplification_levels.keys()))
 
     logger.info("Application startup complete.")
 

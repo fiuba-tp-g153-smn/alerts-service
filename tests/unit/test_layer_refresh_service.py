@@ -10,12 +10,14 @@ import scheduler  # noqa: F401
 from ports.object_storage import IObjectStorage
 from services.layer_refresh_service import LayerRefreshService
 
+_TEST_LEVELS = {1: 0.001}  # 1 level → 2 simplified + 2 fgb = 4 files total
+
 
 @pytest.fixture
 def mock_settings(tmp_path):
     settings = MagicMock()
     settings.data_dir = str(tmp_path)
-    settings.simplify_tolerance = "0.01"
+    settings.simplification_levels = _TEST_LEVELS
     settings.country_geojson_url = "http://example.com/country.geojson"
     settings.departments_geojson_url = "http://example.com/departments.geojson"
     return settings
@@ -60,8 +62,8 @@ async def test_run_success_returns_success_result(service, tmp_raw_files):
     assert result.status == "success"
     assert isinstance(result.files, list)
     assert len(result.files) == 4
-    assert any("pais_simple_" in f for f in result.files)
-    assert any("departamentos_simple_" in f for f in result.files)
+    assert any("pais_simple_L" in f for f in result.files)
+    assert any("departamentos_simple_L" in f for f in result.files)
     assert any(f.endswith(".fgb") for f in result.files)
     assert result.error is None
 
@@ -81,8 +83,8 @@ async def test_run_deletes_old_s3_keys_before_uploading(
     service, mock_storage, tmp_raw_files
 ):
     async def mock_list_keys(prefix):
-        if prefix == "pais_simple_":
-            return ["pais_simple_20240101.geojson"]
+        if prefix == "pais_simple_L1_":
+            return ["pais_simple_L1_20240101.geojson"]
         return []
 
     mock_storage.list_keys.side_effect = mock_list_keys
@@ -94,7 +96,7 @@ async def test_run_deletes_old_s3_keys_before_uploading(
     ):
         await service.run()
 
-    mock_storage.delete.assert_called_once_with("pais_simple_20240101.geojson")
+    mock_storage.delete.assert_called_once_with("pais_simple_L1_20240101.geojson")
 
 
 async def test_run_failure_returns_failed_result(service):
@@ -141,10 +143,10 @@ async def test_run_success_calls_download_with_correct_urls(
     assert mock_settings.departments_geojson_url in download_urls
 
 
-async def test_run_success_calls_simplify_with_configured_tolerance(
-    service, tmp_raw_files
+async def test_run_success_calls_simplify_with_configured_tolerances(
+    service, mock_settings, tmp_raw_files
 ):
-    service.settings.simplify_tolerance = "0.005"
+    mock_settings.simplification_levels = {1: 0.001, 2: 0.05}
 
     with (
         patch("services.layer_refresh_service._download", new_callable=AsyncMock),
@@ -155,8 +157,8 @@ async def test_run_success_calls_simplify_with_configured_tolerance(
     ):
         await service.run()
 
-    tolerance_values = [call.args[2] for call in mock_simplify.call_args_list]
-    assert all(t == 0.005 for t in tolerance_values)
+    tolerance_values = {call.args[2] for call in mock_simplify.call_args_list}
+    assert tolerance_values == {0.001, 0.05}
 
 
 async def test_run_failure_when_simplify_raises_returns_failed_result(
