@@ -14,7 +14,8 @@ import geopandas as gpd
 
 def _write_atomic(gdf, out_path: str, driver: str) -> None:
     """Write gdf to a .tmp sidecar then atomically rename to out_path."""
-    tmp = out_path + ".tmp"
+    stem, ext = os.path.splitext(out_path)
+    tmp = f"{stem}.tmp{ext}"
     try:
         gdf.to_file(tmp, driver=driver)
         os.replace(tmp, out_path)

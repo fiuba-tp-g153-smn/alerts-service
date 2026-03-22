@@ -47,10 +47,12 @@ class LayerRefreshService:  # pylint: disable=too-few-public-methods
         for fname in self._simplified_fnames() + _FGB_FILES:
             new_key = IGeoLayerProcessor.versioned_key(fname)
             local = os.path.join(data_dir, new_key)
+            ext = os.path.splitext(fname)[1]
             # Use level-only prefix (strip _T{tol} suffix) to sweep old-tolerance S3 keys
             level_stem = os.path.splitext(fname)[0].split("_T")[0]
             for key in await self.storage.list_keys(f"{level_stem}_"):
-                await self.storage.delete(key)
+                if key.endswith(ext):
+                    await self.storage.delete(key)
             await self.storage.upload(local, new_key)
             uploaded.append(new_key)
         return uploaded

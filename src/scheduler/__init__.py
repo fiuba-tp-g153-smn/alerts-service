@@ -2,6 +2,7 @@
 
 import glob
 import os
+import shutil
 from logging import Logger
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -23,9 +24,20 @@ def _sweep_orphaned_tmp_files(data_dir: str, logger: Logger) -> None:
         if os.path.exists(path):
             logger.warning("Removing orphaned tmp file from previous run: %s", path)
             os.remove(path)
+    # *.tmp  — legacy style (out_path + ".tmp")
     for tmp_file in glob.glob(os.path.join(data_dir, "*.tmp")):
         logger.warning("Removing orphaned .tmp file from previous run: %s", tmp_file)
         os.remove(tmp_file)
+    # *.tmp.*  — current style (stem + ".tmp" + ext, e.g. pais.tmp.fgb)
+    for tmp_file in glob.glob(os.path.join(data_dir, "*.tmp.*")):
+        logger.warning("Removing orphaned .tmp file from previous run: %s", tmp_file)
+        os.remove(tmp_file)
+    # .fgb directories — left by the buggy out_path+".tmp" naming where GDAL created
+    # a directory datasource that os.replace then renamed to the canonical .fgb path
+    for fgb_path in glob.glob(os.path.join(data_dir, "*.fgb")):
+        if os.path.isdir(fgb_path):
+            logger.warning("Removing corrupt .fgb directory: %s", fgb_path)
+            shutil.rmtree(fgb_path)
 
 
 async def setup_scheduler(settings, logger: Logger) -> AsyncIOScheduler:
