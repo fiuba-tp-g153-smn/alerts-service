@@ -19,9 +19,8 @@ async def lifespan(_app: FastAPI):
     scheduler = await setup_scheduler(settings, logger)
     scheduler.start()
 
-    logger.info("Application startup: preloading simplified geo layers ...")
     geo_repo = get_geo_repo()
-    geo_repo.preload(list(settings.simplification_levels.keys()))
+    geo_repo.start_eviction_loop()
 
     logger.info("Application startup complete.")
 
@@ -30,6 +29,8 @@ async def lifespan(_app: FastAPI):
     logger.info("Application shutdown: stopping scheduler ...")
     scheduler.shutdown()
     logger.info("Scheduler stopped.")
+
+    await geo_repo.stop_eviction_loop()
 
 
 app: FastAPI = FastAPI(

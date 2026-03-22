@@ -30,7 +30,6 @@ def root(logger=Depends(get_logger)):
     response_description="Returns 200 if service is healthy",
     responses=HEALTH_RESPONSES,
 )
-def health_check(logger=Depends(get_logger)):
+def health_check():
     """Perform a health check of the service."""
-    logger.info("Health check")
     return {"status": "running"}

@@ -65,7 +65,6 @@ class LayerRefreshService:  # pylint: disable=too-few-public-methods
     async def _simplify_layers(self, country_tmp: str, deptos_tmp: str) -> None:
         self.logger.info("Simplifying layers ...")
         data_dir = self.settings.data_dir
-        tasks = []
         for level, tolerance in self.settings.simplification_levels.items():
             for stem, tmp in [
                 ("pais_simple", country_tmp),
@@ -77,8 +76,7 @@ class LayerRefreshService:  # pylint: disable=too-few-public-methods
                         f"{stem}_L{level}.geojson", tolerance
                     ),
                 )
-                tasks.append(self.processor.simplify(tmp, out, tolerance))
-        await asyncio.gather(*tasks)
+                await self.processor.simplify(tmp, out, tolerance)
 
     async def _convert_to_fgb_layers(self, country_tmp: str, deptos_tmp: str) -> None:
         self.logger.info("Converting layers to FlatGeobuf ...")

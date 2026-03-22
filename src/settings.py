@@ -52,6 +52,7 @@ class Settings:  # pylint: disable=too-many-instance-attributes,too-few-public-m
                 f"Settings file not found: {self.settings_file}"
             ) from exc
         self.layer_update_cron = data.get("layer_update_cron", "0 3 * * 0")
+        self.layer_cache_ttl_minutes: int = int(data.get("layer_cache_ttl_minutes", 30))
         raw = data.get("simplification_levels", {})
         self.simplification_levels = {int(k): float(v) for k, v in raw.items()}
 
@@ -89,6 +90,7 @@ class Settings:  # pylint: disable=too-many-instance-attributes,too-few-public-m
         logger.info("COUNTRY_GEOJSON_URL: %s", self.country_geojson_url)
         logger.info("DEPARTMENTS_GEOJSON_URL: %s", self.departments_geojson_url)
         logger.info("LAYER_UPDATE_CRON: %s", self.layer_update_cron)
+        logger.info("LAYER_CACHE_TTL_MINUTES: %s", self.layer_cache_ttl_minutes)
 
         for level, tolerance in self.simplification_levels.items():
             logger.info("SIMPLIFICATION_LEVEL_%s: %s", level, tolerance)

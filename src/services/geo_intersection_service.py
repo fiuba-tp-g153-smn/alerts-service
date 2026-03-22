@@ -114,7 +114,7 @@ class GeoIntersectionService:
             return await self._run_fullres("country", LayerType.COUNTRY, input_geom)
 
         t0 = time.time()
-        gdf = self.repo.get_layer(LayerType.COUNTRY, simplification_level)
+        gdf = await self.repo.get_layer(LayerType.COUNTRY, simplification_level)
         self.logger.info(f"intersect_country: load={time.time()-t0:.3f}s")
 
         t0 = time.time()
@@ -145,7 +145,7 @@ class GeoIntersectionService:
             return output["features"]
 
         t0 = time.time()
-        gdf = self.repo.get_layer(LayerType.DEPARTMENTS, simplification_level)
+        gdf = await self.repo.get_layer(LayerType.DEPARTMENTS, simplification_level)
         self.logger.info(f"intersect_departments: load={time.time()-t0:.3f}s")
 
         t0 = time.time()

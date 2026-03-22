@@ -16,7 +16,9 @@ def mock_logger():
 
 @pytest.fixture
 def mock_repo():
-    return MagicMock()
+    repo = MagicMock()
+    repo.get_layer = AsyncMock()
+    return repo
 
 
 @pytest.fixture

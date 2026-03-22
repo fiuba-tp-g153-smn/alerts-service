@@ -29,7 +29,8 @@ def get_geo_repo() -> FileSystemGeoLayerRepository:
     """Return a singleton filesystem-backed geo layer repository."""
     settings = get_settings()
     logger = init_logger(settings)
-    return FileSystemGeoLayerRepository(settings.data_dir, logger)
+    ttl_s = settings.layer_cache_ttl_minutes * 60.0
+    return FileSystemGeoLayerRepository(settings.data_dir, logger, ttl_s=ttl_s)
 
 
 def get_intersection_service(

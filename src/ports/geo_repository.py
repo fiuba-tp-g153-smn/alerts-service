@@ -11,7 +11,7 @@ class IGeoLayerRepository(ABC):
     """Abstract base class for geo layer repository implementations."""
 
     @abstractmethod
-    def get_layer(self, layer: LayerType, level: int) -> gpd.GeoDataFrame:
+    async def get_layer(self, layer: LayerType, level: int) -> gpd.GeoDataFrame:
         """Load and return the cached GeoDataFrame for the given layer and simplification level."""
 
     @abstractmethod
@@ -21,7 +21,3 @@ class IGeoLayerRepository(ABC):
     @abstractmethod
     def get_fullres_fgb_path(self, layer: LayerType) -> str:
         """Return the filesystem path for the latest full-res FlatGeobuf file."""
-
-    @abstractmethod
-    def preload(self, levels: list[int]) -> None:
-        """Preload all level-specific simplified layers into memory."""
