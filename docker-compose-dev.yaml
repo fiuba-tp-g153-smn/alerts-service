@@ -19,6 +19,7 @@
 services:
   alerts-service:
     container_name: alerts-service-dev-container
+    stop_grace_period: 1m
     build:
       context: .
       dockerfile: Dockerfile.dev

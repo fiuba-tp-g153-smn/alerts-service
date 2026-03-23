@@ -1,5 +1,7 @@
 """FastAPI application entry point and lifespan management."""
 
+import asyncio
+import signal
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -16,7 +18,21 @@ async def lifespan(_app: FastAPI):
     """Manage application startup (scheduler init) and shutdown lifecycle."""
     logger.info("Application startup: initializing scheduler ...")
 
-    scheduler = await setup_scheduler(settings, logger)
+    loop = asyncio.get_running_loop()
+    setup_task = asyncio.ensure_future(setup_scheduler(settings, logger))
+
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        loop.add_signal_handler(sig, setup_task.cancel)
+
+    try:
+        scheduler = await setup_task
+    except asyncio.CancelledError:
+        logger.warning("Startup aborted by shutdown signal — exiting.")
+        raise
+    finally:
+        for sig in (signal.SIGTERM, signal.SIGINT):
+            loop.remove_signal_handler(sig)
+
     scheduler.start()
 
     geo_repo = get_geo_repo()

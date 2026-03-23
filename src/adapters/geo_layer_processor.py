@@ -17,6 +17,30 @@ _WORKER_PATH = os.path.abspath(
 )
 
 
+async def _run_worker(task: list[dict]) -> None:
+    """Spawn geo_processing_worker and stream the task via stdin.
+
+    Uses create_subprocess_exec so that CancelledError terminates the child
+    process immediately instead of abandoning a background thread.
+    """
+    proc = await asyncio.create_subprocess_exec(
+        sys.executable,
+        _WORKER_PATH,
+        stdin=asyncio.subprocess.PIPE,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+        env=_WORKER_ENV,
+    )
+    try:
+        _, stderr = await proc.communicate(json.dumps(task).encode())
+    except asyncio.CancelledError:
+        proc.terminate()
+        await proc.wait()
+        raise
+    if proc.returncode != 0:
+        raise subprocess.CalledProcessError(proc.returncode, sys.executable, stderr)
+
+
 class GeoLayerProcessor(IGeoLayerProcessor):
     """Downloads and processes geo layer files using aiohttp and geo_processing_worker."""
 
@@ -38,35 +62,21 @@ class GeoLayerProcessor(IGeoLayerProcessor):
 
     async def simplify(self, in_path: str, out_path: str, tolerance: float) -> None:
         self._logger.info(f"Simplifying {in_path} (tolerance={tolerance}) ...")
-        task = [
-            {
-                "op": "simplify",
-                "in_path": in_path,
-                "out_path": out_path,
-                "tolerance": tolerance,
-            }
-        ]
-        await asyncio.to_thread(
-            subprocess.run,
-            [sys.executable, _WORKER_PATH],
-            input=json.dumps(task),
-            text=True,
-            check=True,
-            capture_output=True,
-            env=_WORKER_ENV,
+        await _run_worker(
+            [
+                {
+                    "op": "simplify",
+                    "in_path": in_path,
+                    "out_path": out_path,
+                    "tolerance": tolerance,
+                }
+            ]
         )
         self._logger.info(f"Simplified → {out_path}")
 
     async def convert_to_fgb(self, in_path: str, out_path: str) -> None:
         self._logger.info(f"Converting {in_path} to FlatGeobuf ...")
-        task = [{"op": "convert_fgb", "in_path": in_path, "out_path": out_path}]
-        await asyncio.to_thread(
-            subprocess.run,
-            [sys.executable, _WORKER_PATH],
-            input=json.dumps(task),
-            text=True,
-            check=True,
-            capture_output=True,
-            env=_WORKER_ENV,
+        await _run_worker(
+            [{"op": "convert_fgb", "in_path": in_path, "out_path": out_path}]
         )
         self._logger.info(f"Converted → {out_path}")

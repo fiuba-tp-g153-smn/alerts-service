@@ -19,6 +19,7 @@
 services:
   alerts-service:
     container_name: alerts-service-container
+    stop_grace_period: 1m
     image: alerts-service
     build:
       context: .
