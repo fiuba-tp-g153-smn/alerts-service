@@ -22,7 +22,7 @@ clean:
 
 prod:
 # Start production environment
-	docker compose up -d --build
+	docker compose up --build
 
 test:
 # Build the test Docker image and run the tests
