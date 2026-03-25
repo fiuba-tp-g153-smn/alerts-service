@@ -29,17 +29,19 @@ import os
 import pickle
 import sys
 
+import cartopy.crs as ccrs
+import cartopy.feature as cfeature
 import matplotlib
-
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 import matplotlib.patheffects as pe
 from matplotlib.patches import Polygon as MplPolygon
 from PIL import Image
 from shapely import wkb as shapely_wkb
-import cartopy.crs as ccrs
-import cartopy.feature as cfeature
+from shapely.geometry import Polygon
+
+matplotlib.use("Agg")  # must precede pyplot import
+
+import matplotlib.pyplot as plt  # pylint: disable=wrong-import-position,import-error,ungrouped-imports
 
 
 def _load_index(path: str) -> list:
@@ -149,7 +151,7 @@ def _panel_aviso(fig, texto, modo="area"):
     )
 
 
-def generar_gif_area(
+def generar_gif_area(  # pylint: disable=too-many-locals
     texto,
     coords,
     partidos,
@@ -280,7 +282,7 @@ def generar_gif_area(
         tmp, format="png", bbox_inches=None, pad_inches=0, facecolor="white", dpi=80
     )
     plt.close(fig)
-    Image.open(tmp).convert("P", palette=Image.ADAPTIVE).save(out, format="GIF")
+    Image.open(tmp).convert("P", palette=Image.Palette.ADAPTIVE).save(out, format="GIF")
     os.remove(tmp)
 
     return out
@@ -356,7 +358,7 @@ def generar_gif_general(texto, coords, timestamp, output_dir, dept_geoms, prov_g
         tmp, format="png", bbox_inches=None, pad_inches=0, facecolor="white", dpi=80
     )
     plt.close(fig_final)
-    Image.open(tmp).convert("P", palette=Image.ADAPTIVE).save(out, format="GIF")
+    Image.open(tmp).convert("P", palette=Image.Palette.ADAPTIVE).save(out, format="GIF")
     os.remove(tmp)
 
     return out
@@ -393,6 +395,8 @@ def main():
         geom = shapely_wkb.loads(geometry_wkb_hex, hex=True)
 
         # Extract coordinates (lat, lon) from polygon
+        if not isinstance(geom, Polygon):
+            raise TypeError(f"Expected Polygon, got {type(geom)}")
         coords_raw = list(geom.exterior.coords)
         coords = [(lon, lat) for lat, lon in coords_raw]  # swap to (lat, lon)
 

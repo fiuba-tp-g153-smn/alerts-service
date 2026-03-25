@@ -1,8 +1,8 @@
 """MySQL adapter for alert database operations."""
 
-import mysql.connector
-from mysql.connector import pooling
 from typing import List, Optional
+
+from mysql.connector import pooling
 
 from ports.mysql_repository import IMySQLRepository
 
@@ -57,6 +57,7 @@ class MySQLAlertsRepository(IMySQLRepository):
     def get_partidos(self) -> List[dict]:
         """Return all partidos with coordinates and province info."""
         conn = self.pool.get_connection()
+        cursor = None
         try:
             cursor = conn.cursor(dictionary=True)
             cursor.execute(
@@ -72,12 +73,14 @@ class MySQLAlertsRepository(IMySQLRepository):
                 row["longitud"] = float(row["longitud"])
             return rows
         finally:
-            cursor.close()
+            if cursor is not None:
+                cursor.close()
             conn.close()
 
     def insert_taviso(self, fenomeno: str, area: str, poligono: str) -> int:
         """Insert alert record and return the generated ID."""
         conn = self.pool.get_connection()
+        cursor = None
         try:
             cursor = conn.cursor()
             cursor.execute(
@@ -87,7 +90,8 @@ class MySQLAlertsRepository(IMySQLRepository):
             conn.commit()
             return cursor.lastrowid
         finally:
-            cursor.close()
+            if cursor is not None:
+                cursor.close()
             conn.close()
 
     def get_fenomeno_text(self, code: int) -> Optional[str]:
@@ -96,4 +100,3 @@ class MySQLAlertsRepository(IMySQLRepository):
 
     def close(self) -> None:
         """Close database connection pool (managed automatically)."""
-        pass

@@ -75,5 +75,6 @@ app.include_router(alerts.router)
 
 # Serve generated alert GIFs as static files
 _output_dir = settings.output_dir
-os.makedirs(_output_dir, exist_ok=True)
-app.mount("/alerts", StaticFiles(directory=_output_dir), name="alerts")
+if _output_dir:
+    os.makedirs(_output_dir, exist_ok=True)
+    app.mount("/alerts", StaticFiles(directory=_output_dir), name="alerts")

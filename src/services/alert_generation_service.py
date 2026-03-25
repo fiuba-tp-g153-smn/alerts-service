@@ -11,7 +11,7 @@ from logging import Logger
 from typing import List
 
 from shapely import wkb as shapely_wkb
-from shapely.geometry import shape, Point
+from shapely.geometry import Point, shape
 
 from ports.mysql_repository import IMySQLRepository
 from services.geo_intersection_service import GeoIntersectionService
@@ -22,7 +22,7 @@ _WORKER_PATH = os.path.join(
 )
 
 
-class AlertGenerationService:
+class AlertGenerationService:  # pylint: disable=too-few-public-methods
     """Generates weather alert maps and persists to database."""
 
     def __init__(
@@ -38,7 +38,9 @@ class AlertGenerationService:
         self.settings = settings
         self.logger = logger
 
-    async def generate_alert(self, geometry: dict, fenomeno_codigo: int) -> dict:
+    async def generate_alert(  # pylint: disable=too-many-locals
+        self, geometry: dict, fenomeno_codigo: int
+    ) -> dict:
         """Generate alert from geometry and phenomenon code.
 
          Returns dict with:
@@ -60,7 +62,7 @@ class AlertGenerationService:
         # 2. Calculate intersection with departments (reuse existing service)
         self.logger.info(f"Calculating intersections for fenomeno {fenomeno_codigo}")
         departments = await self.geo_service.intersect_departments(
-            geometry, simplified=True
+            geometry, simplification_level=1
         )
 
         # 3. Filter partidos spatially
@@ -120,7 +122,7 @@ class AlertGenerationService:
         if not input_geom.is_valid:
             input_geom = input_geom.buffer(0)
 
-        UMBRAL = 0.001  # minimum department coverage fraction (same as genero_aviso.py)
+        umbral = 0.001  # minimum department coverage fraction (same as genero_aviso.py)
 
         # Load full department geometries from pre-built cache
         dept_geoms = []
@@ -136,7 +138,7 @@ class AlertGenerationService:
                 inter = dg.intersection(input_geom)
                 if inter.is_empty:
                     continue
-                if inter.area / dg.area >= UMBRAL:
+                if inter.area / dg.area >= umbral:
                     dept_geoms.append(dg)  # full department geometry
         else:
             # Fallback if cache not built yet: use intersection fragments
@@ -205,7 +207,7 @@ class AlertGenerationService:
 
         Adapted from genero_aviso.py lines 398-405.
         """
-        by_prov = {}
+        by_prov: dict[str, list[str]] = {}
         for p in partidos:
             by_prov.setdefault(p["provincia"].upper(), []).append(p["nom_partido"])
         return (
