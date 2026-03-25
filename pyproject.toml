@@ -28,6 +28,8 @@ mysql-connector-python = "^9.6.0"
 matplotlib = "^3.10.8"
 cartopy = "^0.25.0"
 Pillow = "^12.1.1"
+alembic = "^1.14"
+sqlalchemy = "^2.0"
 
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]
