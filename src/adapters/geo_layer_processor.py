@@ -37,7 +37,7 @@ async def _run_worker(task: list[dict]) -> None:
         proc.terminate()
         await proc.wait()
         raise
-    if proc.returncode != 0:
+    if proc.returncode is not None and proc.returncode != 0:
         raise subprocess.CalledProcessError(proc.returncode, sys.executable, stderr)
 
 

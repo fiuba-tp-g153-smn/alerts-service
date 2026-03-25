@@ -109,7 +109,7 @@ class AlertGenerationService:  # pylint: disable=too-few-public-methods
             "affected_partidos_count": len(affected_partidos),
         }
 
-    def _filter_partidos_by_departments(
+    def _filter_partidos_by_departments(  # pylint: disable=too-many-locals
         self, geometry: dict, departments: List[dict], all_partidos: List[dict]
     ) -> List[dict]:
         """Filter partidos that fall within intersecting departments.

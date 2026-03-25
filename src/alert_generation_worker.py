@@ -28,14 +28,14 @@ import json
 import os
 import pickle
 import sys
-from typing import cast
+from typing import Any, cast
 
 import cartopy.crs as ccrs
 import cartopy.feature as cfeature
-from cartopy.mpl.geoaxes import GeoAxes
 import matplotlib
 import matplotlib.patches as mpatches
 import matplotlib.patheffects as pe
+from cartopy.mpl.geoaxes import GeoAxes
 from matplotlib.patches import Polygon as MplPolygon
 from PIL import Image
 from shapely import wkb as shapely_wkb
@@ -177,7 +177,7 @@ def generar_gif_area(  # pylint: disable=too-many-locals
     try:
         ax.spines["geo"].set_visible(False)
     except KeyError:
-        ax.outline_patch.set_visible(False)
+        cast(Any, ax).outline_patch.set_visible(False)
 
     # Base layers
     ax.add_feature(cfeature.OCEAN.with_scale("50m"), facecolor="#B0D8E8", zorder=0)
@@ -306,7 +306,7 @@ def generar_gif_general(texto, coords, timestamp, output_dir, dept_geoms, prov_g
     try:
         ax_map.spines["geo"].set_visible(False)
     except KeyError:
-        ax_map.outline_patch.set_visible(False)
+        cast(Any, ax_map).outline_patch.set_visible(False)
 
     # Base layers
     ax_map.add_feature(cfeature.OCEAN.with_scale("50m"), facecolor="#B0D8E8", zorder=0)
