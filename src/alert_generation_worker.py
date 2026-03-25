@@ -28,9 +28,11 @@ import json
 import os
 import pickle
 import sys
+from typing import cast
 
 import cartopy.crs as ccrs
 import cartopy.feature as cfeature
+from cartopy.mpl.geoaxes import GeoAxes
 import matplotlib
 import matplotlib.patches as mpatches
 import matplotlib.patheffects as pe
@@ -169,7 +171,7 @@ def generar_gif_area(  # pylint: disable=too-many-locals
 
     proj = ccrs.Mercator()
     fig = plt.figure(figsize=(13.75, 14), dpi=80)
-    ax = fig.add_axes([0, 0.01, 1, 0.86], projection=proj)
+    ax: GeoAxes = cast(GeoAxes, fig.add_axes((0, 0.01, 1, 0.86), projection=proj))
     ax.set_extent([lon_o, lon_e, lat_s, lat_n], crs=ccrs.PlateCarree())
 
     try:
@@ -296,7 +298,9 @@ def generar_gif_general(texto, coords, timestamp, output_dir, dept_geoms, prov_g
 
     proj = ccrs.Mercator()
     fig_final = plt.figure(figsize=(13.75, 14), dpi=80)
-    ax_map = fig_final.add_axes([0, 0.01, 1, 0.86], projection=proj)
+    ax_map: GeoAxes = cast(
+        GeoAxes, fig_final.add_axes((0, 0.01, 1, 0.86), projection=proj)
+    )
     ax_map.set_extent([-78, -51, -56, -21], crs=ccrs.PlateCarree())
 
     try:
