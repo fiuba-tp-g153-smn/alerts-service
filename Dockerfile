@@ -40,8 +40,8 @@ WORKDIR /app
 # Install runtime dependencies for matplotlib/cartopy
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libgeos-c1v5 libproj25 \
-    libgdal35 \
-    libspatialindex-c6 \
+    libgdal-dev \
+    libspatialindex-dev \
     fonts-dejavu-core \
     && rm -rf /var/lib/apt/lists/*
 
