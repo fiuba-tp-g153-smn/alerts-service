@@ -2,6 +2,15 @@ FROM python:3.13.12-slim-trixie
 
 WORKDIR /app
 
+# Install system dependencies for matplotlib/cartopy (needed even in dev for native extensions)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc g++ \
+    libgeos-dev libproj-dev proj-data proj-bin \
+    libgdal-dev gdal-bin \
+    libspatialindex-dev \
+    fonts-dejavu-core \
+    && rm -rf /var/lib/apt/lists/*
+
 # Copy only dependency manifests first (to leverage Docker build cache for faster builds)
 COPY pyproject.toml poetry.lock README.md /app/
 
@@ -15,6 +24,16 @@ RUN pip install "poetry" && poetry config virtualenvs.create false
 # "--without dev": keep container smaller by skipping development deps
 # "--no-root": don't install this project as a package itself, we run code mounted in /app
 RUN (poetry check --lock || poetry lock) && poetry install --without dev --no-root
+
+# Pre-download Natural Earth 50m data during build (saves ~100MB download at runtime)
+RUN python -c "import cartopy.io.shapereader as sr; \
+    combos = [('physical','coastline'),('physical','land'),('physical','ocean'),\
+              ('cultural','admin_0_boundary_lines_land')]; \
+    [list(sr.Reader(sr.natural_earth('50m',c,n)).geometries()) for c,n in combos]; \
+    print('Natural Earth 50m cached')"
+
+# Create output directories
+RUN mkdir -p /app/output/alerts /app/cache
 
 # Commented on purpose. Code should be added as a volume to avoid re-building image on each change
 # for local development

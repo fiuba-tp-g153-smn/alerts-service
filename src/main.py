@@ -1,14 +1,16 @@
 """FastAPI application entry point and lifespan management."""
 
 import asyncio
+import os
 import signal
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from container import get_geo_repo
-from controller import general, intersections
+from controller import alerts, general, intersections
 from dependencies import logger, settings
 from scheduler import setup_scheduler
 
@@ -69,3 +71,9 @@ app.add_middleware(
 
 app.include_router(general.router)
 app.include_router(intersections.router)
+app.include_router(alerts.router)
+
+# Serve generated alert GIFs as static files
+_output_dir = settings.output_dir
+os.makedirs(_output_dir, exist_ok=True)
+app.mount("/alerts", StaticFiles(directory=_output_dir), name="alerts")

@@ -17,6 +17,28 @@
 #   - Swagger docs: http://localhost:8080/docs
 
 services:
+  db:
+    image: mysql:8.0
+    container_name: alerts-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root2024}
+      MYSQL_DATABASE: aviso_gempak
+      MYSQL_USER: avisos
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./sql:/docker-entrypoint-initdb.d:ro
+    ports:
+      - "3306:3306"
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "avisos", "-p${MYSQL_PASSWORD}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - alerts_service_network
+
   alerts-service:
     container_name: alerts-service-container
     stop_grace_period: 1m
@@ -27,8 +49,12 @@ services:
     ports:
       - "${APP_HOST_PORT:-8080}:8080"
     restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
     volumes:
       - alerts_service_data:/app/data
+      - alerts_output:/app/output/alerts
     environment:
       - LOG_LEVEL=${LOG_LEVEL}
       - APP_ENV=${APP_ENV}
@@ -39,6 +65,14 @@ services:
       - S3_SECRET_KEY=${S3_SECRET_KEY}
       - S3_BUCKET_NAME=${S3_BUCKET_NAME}
       - S3_SECURE=${S3_SECURE}
+      - SIMPLIFY_TOLERANCE=${SIMPLIFY_TOLERANCE}
+      - MYSQL_HOST=db
+      - MYSQL_PORT=3306
+      - MYSQL_DATABASE=aviso_gempak
+      - MYSQL_USER=avisos
+      - MYSQL_PASSWORD=${MYSQL_PASSWORD}
+      - OUTPUT_DIR=/app/output/alerts
+      - ALERT_CACHE_DIR=/app/cache
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')"]
       interval: 30s
@@ -55,4 +89,8 @@ networks:
 
 volumes:
   alerts_service_data:
+    driver: local
+  alerts_output:
+    driver: local
+  mysql_data:
     driver: local
