@@ -17,6 +17,26 @@
 #   - Swagger docs: http://localhost:8080/docs
 
 services:
+  mysql:
+    image: mysql:8.0
+    container_name: alerts-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./sql:/docker-entrypoint-initdb.d:ro
+    ports:
+      - "3306:3306"
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "${MYSQL_USER}", "-p${MYSQL_PASSWORD}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   alerts-service:
     container_name: alerts-service-dev-container
     stop_grace_period: 1m
@@ -26,11 +46,15 @@ services:
     ports:
       - "${APP_HOST_PORT}:8080"
     restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
     volumes:
       - ./src:/app
       - ./scripts:/app/scripts
       - ./data:/app/data
       - ./settings.json:/config/settings.json:ro
+      - ./output/alerts:/app/output/alerts
     environment:
       - LOG_LEVEL=${LOG_LEVEL}
       - APP_ENV=${APP_ENV}
@@ -41,6 +65,13 @@ services:
       - S3_SECRET_KEY=${S3_SECRET_KEY}
       - S3_BUCKET_NAME=${S3_BUCKET_NAME}
       - S3_SECURE=${S3_SECURE}
+      - MYSQL_HOST=${MYSQL_HOST}
+      - MYSQL_PORT=${MYSQL_PORT}
+      - MYSQL_DATABASE=${MYSQL_DATABASE}
+      - MYSQL_USER=${MYSQL_USER}
+      - MYSQL_PASSWORD=${MYSQL_PASSWORD}
+      - OUTPUT_DIR=${OUTPUT_DIR}
+      - ALERT_CACHE_DIR=${ALERT_CACHE_DIR}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     healthcheck:
@@ -50,3 +81,6 @@ services:
       retries: 3
       start_period: 8m
       start_interval: 10s
+
+volumes:
+  mysql_data:
