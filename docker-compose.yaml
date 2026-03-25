@@ -50,7 +50,7 @@ services:
       - "${APP_HOST_PORT}:8080"
     restart: unless-stopped
     depends_on:
-      db:
+      mysql:
         condition: service_healthy
     volumes:
       - alerts_service_data:/app/data
