@@ -12,6 +12,7 @@ from adapters.geo_layer_processor import _run_worker
 async def test_run_worker_terminates_subprocess_on_cancellation():
     """When the task is cancelled, the child process must be terminated."""
     mock_proc = AsyncMock()
+    mock_proc.terminate = MagicMock()
     mock_proc.returncode = 0
 
     async def slow_communicate(_input):
