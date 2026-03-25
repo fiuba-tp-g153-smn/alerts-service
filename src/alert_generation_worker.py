@@ -8,10 +8,10 @@ writes result to stdout, and exits (releasing all matplotlib memory).
 Input JSON:
 {
     "geometry_wkb_hex": "...",
-    "fenomeno_text": "TORMENTAS...",
+    "phenomenon_text": "TORMENTAS...",
     "timestamp": "20260315_143052",
-    "affected_partidos": [{...}],
-    "all_partidos": [{...}],
+    "affected_departments": [{...}],
+    "all_departments": [{...}],
     "output_dir": "/app/output/alerts",
     "cache_dir": "/app/cache"
 }
@@ -154,12 +154,12 @@ def _panel_aviso(fig, texto, modo="area"):
 
 
 def generar_gif_area(  # pylint: disable=too-many-locals
-    texto,
+    text,
     coords,
-    partidos,
+    departments,
     timestamp,
     output_dir,
-    todos_partidos,
+    all_departments,
     dept_index,
     prov_geoms,
 ):
@@ -238,45 +238,48 @@ def generar_gif_area(  # pylint: disable=too-many-locals
         )
     )
 
-    # Partidos (all visible in bbox, highlighted if affected)
-    ids_af = {(p["id_provincia"], p["id_localidad"]) for p in partidos}
-    for p in todos_partidos or []:
-        lo, la = float(p["longitud"]), float(p["latitud"])
-        if not (lon_o <= lo <= lon_e and lat_s <= la <= lat_n):
+    # Departments - all visible in bbox, highlighted if affected
+    affected_ids = {(d["id_provincia"], d["id_localidad"]) for d in departments}
+    for department in all_departments or []:
+        lon, lat = float(department["longitud"]), float(department["latitud"])
+        if not (lon_o <= lon <= lon_e and lat_s <= lat <= lat_n):
             continue
 
-        afectado = (p["id_provincia"], p["id_localidad"]) in ids_af
+        is_affected = (
+            department["id_provincia"],
+            department["id_localidad"],
+        ) in affected_ids
 
-        color_pt = "#111111" if afectado else "#555555"
+        color_pt = "#111111" if is_affected else "#555555"
         color_txt = "#111111"
-        marker = "o" if afectado else "."
-        msize = 5 if afectado else 3.5
-        zpt, ztxt = (9, 10) if afectado else (7, 8)
+        marker = "o" if is_affected else "."
+        marker_size = 5 if is_affected else 3.5
+        z_pt, z_txt = (9, 10) if is_affected else (7, 8)
 
         ax.plot(
-            lo,
-            la,
+            lon,
+            lat,
             marker,
             color=color_pt,
-            markersize=msize,
+            markersize=marker_size,
             transform=ccrs.PlateCarree(),
-            zorder=zpt,
+            zorder=z_pt,
         )
 
         ax.text(
-            lo + 0.04,
-            la + 0.03,
-            p["nom_partido"],
+            lon + 0.04,
+            lat + 0.03,
+            department["nom_departamento"],
             fontsize=7.5,
             color=color_txt,
             fontweight="bold",
             transform=ccrs.PlateCarree(),
-            zorder=ztxt,
+            zorder=z_txt,
             clip_on=True,
             path_effects=[pe.withStroke(linewidth=2, foreground="white")],
         )
 
-    _panel_aviso(fig, texto, modo="area")
+    _panel_aviso(fig, text, modo="area")
 
     out = os.path.join(output_dir, f"{timestamp}_aviso.gif")
     tmp = out.replace(".gif", "_tmp.png")
@@ -290,7 +293,7 @@ def generar_gif_area(  # pylint: disable=too-many-locals
     return out
 
 
-def generar_gif_general(texto, coords, timestamp, output_dir, dept_geoms, prov_geoms):
+def generar_gif_general(text, coords, timestamp, output_dir, dept_geoms, prov_geoms):
     """Generate country-wide GIF showing full Argentina with polygon."""
     lons = [c[1] for c in coords]
     lats = [c[0] for c in coords]
@@ -354,7 +357,7 @@ def generar_gif_general(texto, coords, timestamp, output_dir, dept_geoms, prov_g
         )
     )
 
-    _panel_aviso(fig_final, texto, modo="gral")
+    _panel_aviso(fig_final, text, modo="gral")
 
     out = os.path.join(output_dir, f"{timestamp}_gral.gif")
     tmp = out.replace(".gif", "_tmp.png")
@@ -379,10 +382,10 @@ def main():
     try:
         # Extract input
         geometry_wkb_hex = payload["geometry_wkb_hex"]
-        fenomeno_text = payload["fenomeno_text"]
+        phenomenon_text = payload["phenomenon_text"]
         timestamp = payload["timestamp"]
-        affected_partidos = payload["affected_partidos"]
-        all_partidos = payload["all_partidos"]
+        affected_departments = payload["affected_departments"]
+        all_departments = payload["all_departments"]
         output_dir = payload["output_dir"]
         cache_dir = payload.get("cache_dir", "/app/cache")
 
@@ -406,17 +409,17 @@ def main():
 
         # Generate GIFs
         gif_area = generar_gif_area(
-            fenomeno_text,
+            phenomenon_text,
             coords,
-            affected_partidos,
+            affected_departments,
             timestamp,
             output_dir,
-            all_partidos,
+            all_departments,
             dept_index,
             prov_geoms,
         )
         gif_gral = generar_gif_general(
-            fenomeno_text, coords, timestamp, output_dir, dept_geoms_all, prov_geoms
+            phenomenon_text, coords, timestamp, output_dir, dept_geoms_all, prov_geoms
         )
 
         # Write result

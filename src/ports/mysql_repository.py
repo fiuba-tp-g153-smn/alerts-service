@@ -1,23 +1,27 @@
 """Abstract interface for MySQL alert operations."""
 
 from abc import ABC, abstractmethod
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 
 class IMySQLRepository(ABC):
     """Port for MySQL database operations."""
 
     @abstractmethod
-    def get_partidos(self) -> List[dict]:
-        """Return all partidos with coordinates."""
+    def get_departments(self) -> List[dict]:
+        """Return all departments with coordinates."""
 
     @abstractmethod
-    def insert_taviso(self, fenomeno: str, area: str, poligono: str) -> int:
+    def insert_alert(self, phenomenon: str, area: str, polygon: str) -> int:
         """Insert alert record and return ID."""
 
     @abstractmethod
-    def get_fenomeno_text(self, code: int) -> Optional[str]:
+    def get_phenomenon_text(self, code: int) -> Optional[str]:
         """Get phenomenon description by code."""
+
+    @abstractmethod
+    def get_all_phenomena(self) -> Dict[int, Optional[str]]:
+        """Get all phenomenon codes and descriptions."""
 
     @abstractmethod
     def close(self) -> None:

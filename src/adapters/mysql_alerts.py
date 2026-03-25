@@ -1,13 +1,13 @@
 """MySQL adapter for alert database operations."""
 
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from mysql.connector import pooling
 
 from ports.mysql_repository import IMySQLRepository
 
 # Weather phenomenon codes and descriptions (from genero_aviso.py)
-FENOMENOS = {
+PHENOMENA = {
     1: "TORMENTAS FUERTES CON RAFAGAS.",
     2: "TORMENTAS FUERTES CON OCASIONAL CAIDA DE GRANIZO.",
     3: "TORMENTAS FUERTES CON CAIDA DE GRANIZO.",
@@ -54,17 +54,17 @@ class MySQLAlertsRepository(IMySQLRepository):
             password=password,
         )
 
-    def get_partidos(self) -> List[dict]:
-        """Return all partidos with coordinates and province info."""
+    def get_departments(self) -> List[dict]:
+        """Return all departments with coordinates and province info."""
         conn = self.pool.get_connection()
         cursor = None
         try:
             cursor = conn.cursor(dictionary=True)
             cursor.execute(
                 """
-                SELECT p.id_provincia, p.id_localidad, p.nom_partido,
-                       p.latitud, p.longitud, pr.provincia
-                FROM partidos p JOIN provincia pr ON p.id_provincia = pr.id_provincia
+                SELECT d.id_provincia, d.id_localidad, d.nom_departamento,
+                       d.latitud, d.longitud, pr.provincia
+                FROM departamentos d JOIN provincia pr ON d.id_provincia = pr.id_provincia
             """
             )
             rows = cursor.fetchall()
@@ -77,7 +77,7 @@ class MySQLAlertsRepository(IMySQLRepository):
                 cursor.close()
             conn.close()
 
-    def insert_taviso(self, fenomeno: str, area: str, poligono: str) -> int:
+    def insert_alert(self, phenomenon: str, area: str, polygon: str) -> int:
         """Insert alert record and return the generated ID."""
         conn = self.pool.get_connection()
         cursor = None
@@ -85,7 +85,7 @@ class MySQLAlertsRepository(IMySQLRepository):
             cursor = conn.cursor()
             cursor.execute(
                 "INSERT INTO taviso (fenomeno, area, poligono) VALUES (%s, %s, %s)",
-                (fenomeno, area, poligono),
+                (phenomenon, area, polygon),
             )
             conn.commit()
             return cursor.lastrowid
@@ -94,9 +94,13 @@ class MySQLAlertsRepository(IMySQLRepository):
                 cursor.close()
             conn.close()
 
-    def get_fenomeno_text(self, code: int) -> Optional[str]:
+    def get_phenomenon_text(self, code: int) -> Optional[str]:
         """Get phenomenon description by code."""
-        return FENOMENOS.get(code)
+        return PHENOMENA.get(code)
+
+    def get_all_phenomena(self) -> Dict[int, Optional[str]]:
+        """Get all phenomenon codes and descriptions."""
+        return PHENOMENA.copy()
 
     def close(self) -> None:
         """Close database connection pool (managed automatically)."""

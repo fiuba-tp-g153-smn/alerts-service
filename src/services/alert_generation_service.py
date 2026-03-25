@@ -39,83 +39,81 @@ class AlertGenerationService:  # pylint: disable=too-few-public-methods
         self.logger = logger
 
     async def generate_alert(  # pylint: disable=too-many-locals
-        self, geometry: dict, fenomeno_codigo: int
+        self, geometry: dict, phenomenon_code: int
     ) -> dict:
         """Generate alert from geometry and phenomenon code.
 
          Returns dict with:
-         - taviso_id: Database ID of saved alert
+         - alert_id: Database ID of saved alert
          - timestamp: Timestamp string used in filenames
-        - fenomeno_codigo: Input phenomenon code
-         - fenomeno: Full text description
+        - phenomenon_code: Input phenomenon code
+         - phenomenon: Full text description
          - gif_area_url: URL path to area GIF
          - gif_gral_url: URL path to country GIF
-         - affected_partidos_count: Number of affected municipalities
+         - affected_departments_count: Number of affected departments
         """
         t0 = time.time()
 
         # 1. Validate code
-        fenomeno_text = self.mysql_repo.get_fenomeno_text(fenomeno_codigo)
-        if not fenomeno_text:
-            raise ValueError(f"Invalid fenomeno code: {fenomeno_codigo}")
+        phenomenon_text = self.mysql_repo.get_phenomenon_text(phenomenon_code)
+        if not phenomenon_text:
+            raise ValueError(f"Invalid phenomenon code: {phenomenon_code}")
 
         # 2. Calculate intersection with departments (reuse existing service)
-        self.logger.info(f"Calculating intersections for fenomeno {fenomeno_codigo}")
+        self.logger.info(f"Calculating intersections for phenomenon {phenomenon_code}")
         departments = await self.geo_service.intersect_departments(
             geometry, simplification_level=1
         )
 
-        # 3. Filter partidos spatially
-        all_partidos = self.mysql_repo.get_partidos()
-        affected_partidos = self._filter_partidos_by_departments(
-            geometry, departments, all_partidos
+        # 3. Filter departments spatially
+        all_departments = self.mysql_repo.get_departments()
+        affected_departments = self._filter_departments_by_departments(
+            geometry, departments, all_departments
         )
 
         self.logger.info(
             f"Found {len(departments)} intersecting departments, "
-            f"{len(affected_partidos)} affected partidos"
+            f"{len(affected_departments)} affected departments"
         )
 
         # 4. Generate GIFs via subprocess worker
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         worker_result = await self._run_visualization_worker(
-            geometry, fenomeno_text, timestamp, affected_partidos, all_partidos
+            geometry, phenomenon_text, timestamp, affected_departments, all_departments
         )
 
         if worker_result.get("status") != "success":
             raise RuntimeError(f"Visualization failed: {worker_result.get('error')}")
 
         # 5. Save to database
-        area_html = self._format_area_html(affected_partidos)
-        poligono_str = self._format_poligono(geometry)
-        taviso_id = self.mysql_repo.insert_taviso(
-            fenomeno_text, area_html, poligono_str
-        )
+        area_html = self._format_area_html(affected_departments)
+        polygon_str = self._format_polygon(geometry)
+        alert_id = self.mysql_repo.insert_alert(phenomenon_text, area_html, polygon_str)
 
         duration = time.time() - t0
-        self.logger.info(f"Alert {taviso_id} generated in {duration:.2f}s")
+        self.logger.info(f"Alert {alert_id} generated in {duration:.2f}s")
 
         # Extract just the filename from full path for URL
         gif_area_filename = os.path.basename(worker_result["gif_area"])
         gif_gral_filename = os.path.basename(worker_result["gif_gral"])
 
         return {
-            "taviso_id": taviso_id,
+            "alert_id": alert_id,
             "timestamp": timestamp,
-            "fenomeno_codigo": fenomeno_codigo,
-            "fenomeno": fenomeno_text,
+            "phenomenon_code": phenomenon_code,
+            "phenomenon": phenomenon_text,
             "gif_area_url": f"/alerts/{gif_area_filename}",
             "gif_gral_url": f"/alerts/{gif_gral_filename}",
-            "affected_partidos_count": len(affected_partidos),
+            "affected_departments_count": len(affected_departments),
         }
 
-    def _filter_partidos_by_departments(  # pylint: disable=too-many-locals
-        self, geometry: dict, departments: List[dict], all_partidos: List[dict]
+    def _filter_departments_by_departments(  # pylint: disable=too-many-locals
+        self, geometry: dict, departments: List[dict], all_departments: List[dict]
     ) -> List[dict]:
-        """Filter partidos that fall within intersecting departments.
+        """Filter departments that fall within intersecting departments.
 
         Matches genero_aviso.py lines 136-166: uses FULL department geometries
-        (not intersection fragments) so partidos anywhere in an affected department
+        (not intersection fragments) so departments anywhere in an affected department
         are included.
         """
         input_geom = shape(geometry)
@@ -144,7 +142,7 @@ class AlertGenerationService:  # pylint: disable=too-few-public-methods
             # Fallback if cache not built yet: use intersection fragments
             self.logger.warning(
                 "dept_index.pkl not found — falling back to intersection fragments "
-                "(some partidos may be missed)"
+                "(some departments may be missed)"
             )
             for d in departments:
                 if "intersection" in d:
@@ -153,30 +151,35 @@ class AlertGenerationService:  # pylint: disable=too-few-public-methods
                     except Exception:  # pylint: disable=broad-exception-caught
                         pass
 
-        resultado = []
-        for p in all_partidos:
-            pt = Point(float(p["longitud"]), float(p["latitud"]))
+        result = []
+        for department in all_departments:
+            pt = Point(float(department["longitud"]), float(department["latitud"]))
             hit = (
                 any(dg.contains(pt) for dg in dept_geoms)
                 if dept_geoms
                 else input_geom.contains(pt)
             )
             if hit:
-                resultado.append(p)
+                result.append(department)
 
-        return resultado
+        return result
 
     async def _run_visualization_worker(
-        self, geometry, fenomeno_text, timestamp, affected_partidos, all_partidos
+        self,
+        geometry,
+        phenomenon_text,
+        timestamp,
+        affected_departments,
+        all_departments,
     ) -> dict:
         """Run visualization in isolated subprocess (follows fullres_worker pattern)."""
         payload = json.dumps(
             {
                 "geometry_wkb_hex": shapely_wkb.dumps(shape(geometry), hex=True),
-                "fenomeno_text": fenomeno_text,
+                "phenomenon_text": phenomenon_text,
                 "timestamp": timestamp,
-                "affected_partidos": affected_partidos,
-                "all_partidos": all_partidos,
+                "affected_departments": affected_departments,
+                "all_departments": all_departments,
                 "output_dir": self.settings.output_dir,
                 "cache_dir": self.settings.alert_cache_dir,
             }
@@ -202,23 +205,25 @@ class AlertGenerationService:  # pylint: disable=too-few-public-methods
                 f"Worker returned invalid JSON: {stdout_bytes[:200]!r}"
             ) from exc
 
-    def _format_area_html(self, partidos: List[dict]) -> str:
-        """Format partidos by province for HTML display.
+    def _format_area_html(self, departments: List[dict]) -> str:
+        """Format departments by province for HTML display.
 
         Adapted from genero_aviso.py lines 398-405.
         """
         by_prov: dict[str, list[str]] = {}
-        for p in partidos:
-            by_prov.setdefault(p["provincia"].upper(), []).append(p["nom_partido"])
+        for department in departments:
+            by_prov.setdefault(department["provincia"].upper(), []).append(
+                department["nom_departamento"]
+            )
         return (
             "<br /><br />".join(
-                f"<b>{prov}:</b> {' - '.join(sorted(ns))}."
-                for prov, ns in sorted(by_prov.items())
+                f"<b>{prov}:</b> {' - '.join(sorted(names))}."
+                for prov, names in sorted(by_prov.items())
             )
-            or "(Sin partidos en el área)"
+            or "(Sin departamentos en el área)"
         )
 
-    def _format_poligono(self, geometry: dict) -> str:
+    def _format_polygon(self, geometry: dict) -> str:
         """Format geometry coordinates for database storage.
 
         Adapted from genero_aviso.py line 476.

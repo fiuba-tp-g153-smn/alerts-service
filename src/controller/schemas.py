@@ -1,6 +1,6 @@
 """Pydantic input schemas for geo intersection endpoints."""
 
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from pydantic import BaseModel, model_validator
 
@@ -35,3 +35,10 @@ class GeoJSONInput(BaseModel):
         if geojson_type == "feature":
             return data.get("geometry") or {}
         return data
+
+
+class Phenomenon(BaseModel):
+    """Model for a weather phenomenon."""
+
+    code: int
+    description: Optional[str]
