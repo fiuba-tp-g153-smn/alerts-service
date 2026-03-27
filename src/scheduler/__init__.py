@@ -91,7 +91,9 @@ async def _build_alert_cache(settings, logger: Logger) -> None:
     os.makedirs(cache_dir, exist_ok=True)
 
     def _latest_geojson(stem: str) -> str | None:
-        matches = sorted(glob.glob(os.path.join(data_dir, f"{stem}_*.geojson")))
+        matches = sorted(glob.glob(os.path.join(data_dir, f"{stem}_L4_*.geojson")))
+        if not matches:
+            matches = sorted(glob.glob(os.path.join(data_dir, f"{stem}_*.geojson")))
         return matches[-1] if matches else None
 
     def _build_index(path: str) -> list:
