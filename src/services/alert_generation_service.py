@@ -198,10 +198,10 @@ class AlertGenerationService:  # pylint: disable=too-few-public-methods
             stdout_bytes, stderr_bytes = await asyncio.wait_for(
                 proc.communicate(payload.encode()), timeout=120
             )
-        except asyncio.TimeoutError:
+        except asyncio.TimeoutError as exc:
             proc.kill()
             await proc.wait()
-            raise RuntimeError("Visualization worker timed out after 120s")
+            raise RuntimeError("Visualization worker timed out after 120s") from exc
 
         if proc.returncode != 0:
             self.logger.error(f"Worker failed: {stderr_bytes.decode()}")
