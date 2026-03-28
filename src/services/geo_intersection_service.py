@@ -91,7 +91,7 @@ class GeoIntersectionService:
         self, task: str, layer_type: LayerType, input_geom, bbox: tuple | None = None
     ) -> dict:
         """Resolve the layer path and run the fullres subprocess, returning the raw result."""
-        t0 = time.time()
+        t0 = time.perf_counter()
         try:
             layer_path = self.repo.get_fullres_fgb_path(layer_type)
         except FileNotFoundError:
@@ -100,7 +100,7 @@ class GeoIntersectionService:
             task, input_geom, layer_path, bbox=bbox
         )
         self.logger.info(
-            f"intersect_{task} (fullres subprocess): {time.time()-t0:.3f}s"
+            f"intersect_{task} (fullres subprocess): {time.perf_counter()-t0:.3f}s"
         )
         return result
 
@@ -113,18 +113,18 @@ class GeoIntersectionService:
         if simplification_level == 0:
             return await self._run_fullres("country", LayerType.COUNTRY, input_geom)
 
-        t0 = time.time()
+        t0 = time.perf_counter()
         gdf = await self.repo.get_layer(LayerType.COUNTRY, simplification_level)
-        self.logger.info(f"intersect_country: load={time.time()-t0:.3f}s")
+        self.logger.info(f"intersect_country: load={time.perf_counter()-t0:.3f}s")
 
-        t0 = time.time()
+        t0 = time.perf_counter()
         intersection = gdf[gdf.intersects(input_geom)].intersection(input_geom)
-        self.logger.info(f"intersect_country: intersect={time.time()-t0:.3f}s")
+        self.logger.info(f"intersect_country: intersect={time.perf_counter()-t0:.3f}s")
 
-        t0 = time.time()
+        t0 = time.perf_counter()
         result = json.loads(intersection.to_json())
         self.logger.info(
-            f"intersect_country: serialize={time.time()-t0:.3f}s"
+            f"intersect_country: serialize={time.perf_counter()-t0:.3f}s"
             f" (simplification_level={simplification_level})"
         )
         return result
@@ -144,19 +144,21 @@ class GeoIntersectionService:
             )
             return output["features"]
 
-        t0 = time.time()
+        t0 = time.perf_counter()
         gdf = await self.repo.get_layer(LayerType.DEPARTMENTS, simplification_level)
-        self.logger.info(f"intersect_departments: load={time.time()-t0:.3f}s")
+        self.logger.info(f"intersect_departments: load={time.perf_counter()-t0:.3f}s")
 
-        t0 = time.time()
+        t0 = time.perf_counter()
         intersecting = gdf[gdf.intersects(input_geom)].copy()
         intersecting["intersection"] = intersecting["geometry"].intersection(input_geom)
-        self.logger.info(f"intersect_departments: intersect={time.time()-t0:.3f}s")
+        self.logger.info(
+            f"intersect_departments: intersect={time.perf_counter()-t0:.3f}s"
+        )
 
-        t0 = time.time()
+        t0 = time.perf_counter()
         features = build_department_features(intersecting)
         self.logger.info(
-            f"intersect_departments: serialize={time.time()-t0:.3f}s"
+            f"intersect_departments: serialize={time.perf_counter()-t0:.3f}s"
             f" (simplification_level={simplification_level})"
         )
         return features

@@ -39,7 +39,7 @@ async def generate_alert(
 
     Also inserts the alert record into the `taviso` table in MySQL.
     """
-    start_time = time.time()
+    start_time = time.perf_counter()
     try:
         geometry = geojson.extract_geometry()
         logger.info(
@@ -47,7 +47,7 @@ async def generate_alert(
             f" type={geometry.get('type')})"
         )
         result = await service.generate_alert(geometry, phenomenon_code)
-        elapsed = time.time() - start_time
+        elapsed = time.perf_counter() - start_time
         logger.info(
             f"generate_alert: done (alert_id={result['alert_id']})"
             f" in {elapsed:.3f}s"

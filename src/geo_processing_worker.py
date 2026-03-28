@@ -19,7 +19,7 @@ def _write_atomic(gdf, out_path: str, driver: str) -> None:
     try:
         gdf.to_file(tmp, driver=driver)
         os.replace(tmp, out_path)
-    except:  # pylint: disable=bare-except
+    except Exception:
         if os.path.exists(tmp):
             os.remove(tmp)
         raise

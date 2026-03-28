@@ -41,6 +41,12 @@ async def _run_worker(task: list[dict]) -> None:
         raise subprocess.CalledProcessError(proc.returncode, sys.executable, stderr)
 
 
+def _write_bytes_to_file(path: str, data: bytes) -> None:
+    """Write bytes to file (blocking I/O, meant for asyncio.to_thread)."""
+    with open(path, "wb") as f:
+        f.write(data)
+
+
 class GeoLayerProcessor(IGeoLayerProcessor):
     """Downloads and processes geo layer files using aiohttp and geo_processing_worker."""
 
@@ -55,8 +61,7 @@ class GeoLayerProcessor(IGeoLayerProcessor):
             ) as resp:
                 resp.raise_for_status()
                 content = await resp.read()
-        with open(out_path, "wb") as f:
-            f.write(content)
+        await asyncio.to_thread(_write_bytes_to_file, out_path, content)
         size_mb = os.path.getsize(out_path) / 1_048_576
         self._logger.info(f"Saved {out_path} ({size_mb:.1f} MB)")
 

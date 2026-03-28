@@ -71,11 +71,3 @@ class SqliteHistoryRepository(IHistoryRepository):
     def close(self) -> None:
         """Close the underlying database connection."""
         self._conn.close()
-
-    def __del__(self) -> None:
-        conn = getattr(self, "_conn", None)
-        if conn is not None:
-            try:
-                conn.close()
-            except sqlite3.Error:
-                pass

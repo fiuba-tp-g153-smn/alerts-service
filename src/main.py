@@ -9,7 +9,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from container import get_geo_repo
+from container import get_geo_repo, get_history_repo, get_mysql_repo
 from controller import alerts, general, intersections
 from dependencies import logger, settings
 from scheduler import setup_scheduler
@@ -49,6 +49,10 @@ async def lifespan(_app: FastAPI):
     logger.info("Scheduler stopped.")
 
     await geo_repo.stop_eviction_loop()
+
+    get_history_repo().close()
+    get_mysql_repo().close()
+    logger.info("Database connections closed.")
 
 
 app: FastAPI = FastAPI(

@@ -103,4 +103,11 @@ class MySQLAlertsRepository(IMySQLRepository):
         return PHENOMENA.copy()
 
     def close(self) -> None:
-        """Close database connection pool (managed automatically)."""
+        """Close all connections in the pool."""
+        # MySQLConnectionPool doesn't have a close_all; drain active connections
+        try:
+            while True:
+                conn = self.pool.get_connection()
+                conn.close()
+        except Exception:  # pylint: disable=broad-exception-caught
+            pass  # Pool exhausted — all connections closed

@@ -1,5 +1,6 @@
 """Scheduler setup for the alerts service."""
 
+import asyncio
 import glob
 import json
 import os
@@ -105,21 +106,28 @@ async def _build_alert_cache(settings, logger: Logger) -> None:
             index.append((g.bounds, g))
         return index
 
-    for stem, out_name in [
-        ("departamentos_simple", "dept_index.pkl"),
-        ("provincias_simple", "prov_index.pkl"),
-    ]:
+    def _build_and_dump(stem: str, out_name: str) -> tuple[int, float] | None:
         path = _latest_geojson(stem)
         if not path:
-            logger.warning(f"No {stem} geojson found — skipping {out_name}")
-            continue
+            return None
         logger.info(f"Building {out_name} from {os.path.basename(path)} ...")
         index = _build_index(path)
         out = os.path.join(cache_dir, out_name)
         with open(out, "wb") as f:
             pickle.dump(index, f, protocol=pickle.HIGHEST_PROTOCOL)
         size_mb = os.path.getsize(out) / 1024 / 1024
-        logger.info(f"  → {len(index)} geometries → {out_name} ({size_mb:.1f} MB)")
+        return len(index), size_mb
+
+    for stem, out_name in [
+        ("departamentos_simple", "dept_index.pkl"),
+        ("provincias_simple", "prov_index.pkl"),
+    ]:
+        result = await asyncio.to_thread(_build_and_dump, stem, out_name)
+        if result is None:
+            logger.warning(f"No {stem} geojson found — skipping {out_name}")
+            continue
+        count, size_mb = result
+        logger.info(f"  → {count} geometries → {out_name} ({size_mb:.1f} MB)")
 
 
 async def setup_scheduler(settings, logger: Logger) -> AsyncIOScheduler:

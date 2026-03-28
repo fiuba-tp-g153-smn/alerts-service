@@ -35,7 +35,7 @@ async def intersect_country(
     Input: GeoJSON Geometry, Feature, or FeatureCollection.
     Output: GeoJSON FeatureCollection of intersection(s).
     """
-    start_time = time.time()
+    start_time = time.perf_counter()
     try:
         geometry = geojson.extract_geometry()
         logger.info(
@@ -43,7 +43,7 @@ async def intersect_country(
             f" type={geometry.get('type')})"
         )
         result = await service.intersect_country(geometry, simplification_level)
-        elapsed = time.time() - start_time
+        elapsed = time.perf_counter() - start_time
         logger.info(
             f"intersect_country: done (simplification_level={simplification_level})"
             f" in {elapsed:.3f}s"
@@ -84,7 +84,7 @@ async def intersect_departments(
     Input: GeoJSON Geometry, Feature, or FeatureCollection.
     Output: List of departments with intersection and full geometry.
     """
-    start_time = time.time()
+    start_time = time.perf_counter()
     try:
         geometry = geojson.extract_geometry()
         logger.info(
@@ -92,7 +92,7 @@ async def intersect_departments(
             f" type={geometry.get('type')})"
         )
         features = await service.intersect_departments(geometry, simplification_level)
-        elapsed = time.time() - start_time
+        elapsed = time.perf_counter() - start_time
         logger.info(
             f"intersect_departments: done (simplification_level={simplification_level})"
             f" in {elapsed:.3f}s, {len(features)} departments"

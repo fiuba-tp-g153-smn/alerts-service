@@ -52,7 +52,7 @@ class AlertGenerationService:  # pylint: disable=too-few-public-methods
          - gif_gral_url: URL path to country GIF
          - affected_departments_count: Number of affected departments
         """
-        t0 = time.time()
+        t0 = time.perf_counter()
 
         # 1. Validate code
         phenomenon_text = self.mysql_repo.get_phenomenon_text(phenomenon_code)
@@ -67,7 +67,7 @@ class AlertGenerationService:  # pylint: disable=too-few-public-methods
 
         # 3. Filter departments spatially
         all_departments = self.mysql_repo.get_departments()
-        affected_departments = self._filter_departments_by_departments(
+        affected_departments = await self._filter_departments_by_departments(
             geometry, departments, all_departments
         )
 
@@ -90,7 +90,7 @@ class AlertGenerationService:  # pylint: disable=too-few-public-methods
         polygon_str = self._format_polygon(geometry)
         alert_id = self.mysql_repo.insert_alert(phenomenon_text, area_html, polygon_str)
 
-        duration = time.time() - t0
+        duration = time.perf_counter() - t0
         self.logger.info(f"Alert {alert_id} generated in {duration:.2f}s")
 
         # Extract just the filename from full path for URL
@@ -107,7 +107,7 @@ class AlertGenerationService:  # pylint: disable=too-few-public-methods
             "affected_departments_count": len(affected_departments),
         }
 
-    def _filter_departments_by_departments(  # pylint: disable=too-many-locals
+    async def _filter_departments_by_departments(  # pylint: disable=too-many-locals
         self, geometry: dict, departments: List[dict], all_departments: List[dict]
     ) -> List[dict]:
         """Filter departments that fall within intersecting departments.
@@ -126,8 +126,7 @@ class AlertGenerationService:  # pylint: disable=too-few-public-methods
         dept_geoms = []
         dept_index_path = os.path.join(self.settings.alert_cache_dir, "dept_index.pkl")
         if os.path.exists(dept_index_path):
-            with open(dept_index_path, "rb") as f:
-                dept_index = pickle.load(f)
+            dept_index = await asyncio.to_thread(self._load_dept_index, dept_index_path)
             bx0, by0, bx1, by1 = input_geom.bounds
             for (dx0, dy0, dx1, dy1), dg in dept_index:
                 # Bbox pre-filter
@@ -148,8 +147,11 @@ class AlertGenerationService:  # pylint: disable=too-few-public-methods
                 if "intersection" in d:
                     try:
                         dept_geoms.append(shape(d["intersection"]))
-                    except Exception:  # pylint: disable=broad-exception-caught
-                        pass
+                    except (KeyError, ValueError, TypeError) as exc:
+                        self.logger.warning(
+                            "Skipping malformed intersection fragment: %s", exc
+                        )
+                        continue
 
         result = []
         for department in all_departments:
@@ -192,7 +194,14 @@ class AlertGenerationService:  # pylint: disable=too-few-public-methods
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        stdout_bytes, stderr_bytes = await proc.communicate(payload.encode())
+        try:
+            stdout_bytes, stderr_bytes = await asyncio.wait_for(
+                proc.communicate(payload.encode()), timeout=120
+            )
+        except asyncio.TimeoutError:
+            proc.kill()
+            await proc.wait()
+            raise RuntimeError("Visualization worker timed out after 120s")
 
         if proc.returncode != 0:
             self.logger.error(f"Worker failed: {stderr_bytes.decode()}")
@@ -204,6 +213,12 @@ class AlertGenerationService:  # pylint: disable=too-few-public-methods
             raise RuntimeError(
                 f"Worker returned invalid JSON: {stdout_bytes[:200]!r}"
             ) from exc
+
+    @staticmethod
+    def _load_dept_index(path: str) -> list:
+        """Load pickled department spatial index from disk (blocking I/O)."""
+        with open(path, "rb") as f:
+            return pickle.load(f)
 
     def _format_area_html(self, departments: List[dict]) -> str:
         """Format departments by province for HTML display.

@@ -29,7 +29,9 @@ class S3ObjectStorage(IObjectStorage):
             "aws_access_key_id": self.settings.s3_access_key,
             "aws_secret_access_key": self.settings.s3_secret_key,
             "config": Config(
-                connect_timeout=5, read_timeout=30, retries={"max_attempts": 1}
+                connect_timeout=5,
+                read_timeout=30,
+                retries={"max_attempts": 3, "mode": "adaptive"},
             ),
         }
         if self.settings.s3_endpoint:
@@ -79,10 +81,6 @@ class S3ObjectStorage(IObjectStorage):
                 )
                 return False
             raise
-        except (  # pylint: disable=broad-exception-caught
-            EndpointConnectionError,
-            BotoCoreError,
-            Exception,
-        ) as e:
+        except (EndpointConnectionError, BotoCoreError) as e:
             self.logger.warning(f"S3 unreachable, skipping restore for {key}: {e}")
             return False
