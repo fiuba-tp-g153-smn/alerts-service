@@ -21,6 +21,15 @@ _WORKER_PATH = os.path.join(
     os.path.dirname(__file__), "..", "alert_generation_worker.py"
 )
 
+# Caps concurrent visualization subprocess launches to prevent simultaneous RAM peaks.
+# Value of 2 (vs 1 for fullres) because viz workers are lighter (~300 MB vs ~2 GB).
+_ALERT_VIZ_SEMAPHORE = asyncio.Semaphore(2)
+
+# Module-level cache for dept_index.pkl — immutable during app lifetime (only rebuilt
+# at startup by the scheduler before the app serves requests).
+_DEPT_INDEX_CACHE: list | None = None
+_DEPT_INDEX_LOCK = asyncio.Lock()
+
 
 class AlertGenerationService:  # pylint: disable=too-few-public-methods
     """Generates weather alert maps and persists to database."""
@@ -122,27 +131,25 @@ class AlertGenerationService:  # pylint: disable=too-few-public-methods
 
         umbral = 0.001  # minimum department coverage fraction (same as genero_aviso.py)
 
-        # Load full department geometries from pre-built cache
-        dept_geoms = []
+        # Load full department geometries from cached index (double-checked locking)
         dept_index_path = os.path.join(self.settings.alert_cache_dir, "dept_index.pkl")
-        if os.path.exists(dept_index_path):
-            dept_index = await asyncio.to_thread(self._load_dept_index, dept_index_path)
-            bx0, by0, bx1, by1 = input_geom.bounds
-            for (dx0, dy0, dx1, dy1), dg in dept_index:
-                # Bbox pre-filter
-                if dx1 < bx0 or dx0 > bx1 or dy1 < by0 or dy0 > by1:
-                    continue
-                inter = dg.intersection(input_geom)
-                if inter.is_empty:
-                    continue
-                if inter.area / dg.area >= umbral:
-                    dept_geoms.append(dg)  # full department geometry
+        dept_index = await self._get_dept_index(dept_index_path)
+
+        if dept_index is not None:
+            result = await asyncio.to_thread(
+                self._compute_spatial_filter,
+                input_geom,
+                dept_index,
+                all_departments,
+                umbral,
+            )
         else:
             # Fallback if cache not built yet: use intersection fragments
             self.logger.warning(
                 "dept_index.pkl not found — falling back to intersection fragments "
                 "(some departments may be missed)"
             )
+            dept_geoms = []
             for d in departments:
                 if "intersection" in d:
                     try:
@@ -152,7 +159,59 @@ class AlertGenerationService:  # pylint: disable=too-few-public-methods
                             "Skipping malformed intersection fragment: %s", exc
                         )
                         continue
+            result = await asyncio.to_thread(
+                self._compute_spatial_filter_from_geoms,
+                input_geom,
+                dept_geoms,
+                all_departments,
+            )
 
+        return result
+
+    @staticmethod
+    async def _get_dept_index(dept_index_path: str) -> list | None:
+        """Return cached dept_index, loading from disk on first call."""
+        global _DEPT_INDEX_CACHE  # pylint: disable=global-statement
+        if not os.path.exists(dept_index_path):
+            return None
+        if _DEPT_INDEX_CACHE is None:
+            async with _DEPT_INDEX_LOCK:
+                if _DEPT_INDEX_CACHE is None:
+                    _DEPT_INDEX_CACHE = await asyncio.to_thread(
+                        AlertGenerationService._load_dept_index, dept_index_path
+                    )
+        return _DEPT_INDEX_CACHE
+
+    @staticmethod
+    def _compute_spatial_filter(
+        input_geom, dept_index: list, all_departments: list, umbral: float
+    ) -> list:
+        """CPU-bound spatial filtering (runs in thread pool)."""
+        dept_geoms = []
+        bx0, by0, bx1, by1 = input_geom.bounds
+        for (dx0, dy0, dx1, dy1), dg in dept_index:
+            if dx1 < bx0 or dx0 > bx1 or dy1 < by0 or dy0 > by1:
+                continue
+            inter = dg.intersection(input_geom)
+            if inter.is_empty:
+                continue
+            if inter.area / dg.area >= umbral:
+                dept_geoms.append(dg)
+
+        result = []
+        for department in all_departments:
+            pt = Point(float(department["longitud"]), float(department["latitud"]))
+            if dept_geoms and any(dg.contains(pt) for dg in dept_geoms):
+                result.append(department)
+            elif not dept_geoms and input_geom.contains(pt):
+                result.append(department)
+        return result
+
+    @staticmethod
+    def _compute_spatial_filter_from_geoms(
+        input_geom, dept_geoms: list, all_departments: list
+    ) -> list:
+        """CPU-bound spatial filtering from pre-built geom list (runs in thread pool)."""
         result = []
         for department in all_departments:
             pt = Point(float(department["longitud"]), float(department["latitud"]))
@@ -163,7 +222,6 @@ class AlertGenerationService:  # pylint: disable=too-few-public-methods
             )
             if hit:
                 result.append(department)
-
         return result
 
     async def _run_visualization_worker(
@@ -187,21 +245,22 @@ class AlertGenerationService:  # pylint: disable=too-few-public-methods
             }
         )
 
-        proc = await asyncio.create_subprocess_exec(
-            sys.executable,
-            _WORKER_PATH,
-            stdin=asyncio.subprocess.PIPE,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        try:
-            stdout_bytes, stderr_bytes = await asyncio.wait_for(
-                proc.communicate(payload.encode()), timeout=120
+        async with _ALERT_VIZ_SEMAPHORE:
+            proc = await asyncio.create_subprocess_exec(
+                sys.executable,
+                _WORKER_PATH,
+                stdin=asyncio.subprocess.PIPE,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
             )
-        except asyncio.TimeoutError as exc:
-            proc.kill()
-            await proc.wait()
-            raise RuntimeError("Visualization worker timed out after 120s") from exc
+            try:
+                stdout_bytes, stderr_bytes = await asyncio.wait_for(
+                    proc.communicate(payload.encode()), timeout=120
+                )
+            except asyncio.TimeoutError as exc:
+                proc.kill()
+                await proc.wait()
+                raise RuntimeError("Visualization worker timed out after 120s") from exc
 
         if proc.returncode != 0:
             self.logger.error(f"Worker failed: {stderr_bytes.decode()}")
