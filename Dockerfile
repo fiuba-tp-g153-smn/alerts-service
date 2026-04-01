@@ -60,7 +60,7 @@ RUN mkdir -p /app/output/alerts /app/cache
 
 # Copy the actual application code into /app
 COPY ./src /app
-COPY alembic.ini /app/alembic.ini
+COPY alembic.ini /config/alembic.ini
 COPY alembic /app/alembic
 
 # Copy settings file
