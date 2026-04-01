@@ -1,6 +1,7 @@
 {
   "layer_update_cron": "0 3 * * 0",
   "layer_cache_ttl_minutes": 30,
+  "alert_simplification_level": 4,
   "simplification_levels": {
     "1": 0.0001,
     "2": 0.001,

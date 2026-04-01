@@ -60,10 +60,13 @@ async def _ensure_alert_layers(
 ) -> None:
     """Ensure alert-specific layers are present locally (simplified GeoJSON only)."""
     data_dir = settings.data_dir
-    tolerance = float(getattr(settings, "simplify_tolerance", 0.01))
+    level = settings.alert_simplification_level
+    tolerance = settings.simplification_levels.get(level, 0.005)
 
     def _local_date(stem: str) -> str | None:
-        matches = sorted(glob.glob(os.path.join(data_dir, f"{stem}_????????.geojson")))
+        matches = sorted(
+            glob.glob(os.path.join(data_dir, f"{stem}_L{level}_T*_????????.geojson"))
+        )
         return _extract_date(matches[-1]) if matches else None
 
     for layer in _ALERT_LAYERS:
@@ -76,7 +79,9 @@ async def _ensure_alert_layers(
         raw_tmp = os.path.join(data_dir, layer["raw_tmp"])
         simplified_path = os.path.join(
             data_dir,
-            IGeoLayerProcessor.versioned_key(f"{layer['simplified_stem']}.geojson"),
+            IGeoLayerProcessor.tolerance_versioned_key(
+                f"{layer['simplified_stem']}_L{level}.geojson", tolerance
+            ),
         )
 
         await processor.download(url, raw_tmp)
@@ -91,9 +96,25 @@ async def _build_alert_cache(settings, logger: Logger) -> None:
     cache_dir = settings.alert_cache_dir
     os.makedirs(cache_dir, exist_ok=True)
 
+    logger.info(
+        "Building alert cache using simplification level %d",
+        settings.alert_simplification_level,
+    )
+
     def _latest_geojson(stem: str) -> str | None:
-        matches = sorted(glob.glob(os.path.join(data_dir, f"{stem}_L4_*.geojson")))
+        matches = sorted(
+            glob.glob(
+                os.path.join(
+                    data_dir, f"{stem}_L{settings.alert_simplification_level}_*.geojson"
+                )
+            )
+        )
         if not matches:
+            logger.warning(
+                "No L%d file found for %s — falling back to latest available",
+                settings.alert_simplification_level,
+                stem,
+            )
             matches = sorted(glob.glob(os.path.join(data_dir, f"{stem}_*.geojson")))
         return matches[-1] if matches else None
 

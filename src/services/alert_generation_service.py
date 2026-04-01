@@ -71,7 +71,7 @@ class AlertGenerationService:  # pylint: disable=too-few-public-methods
         # 2. Calculate intersection with departments (reuse existing service)
         self.logger.info(f"Calculating intersections for phenomenon {phenomenon_code}")
         departments = await self.geo_service.intersect_departments(
-            geometry, simplification_level=1
+            geometry, simplification_level=self.settings.alert_simplification_level
         )
 
         # 3. Filter departments spatially
@@ -97,6 +97,13 @@ class AlertGenerationService:  # pylint: disable=too-few-public-methods
         # 5. Save to database
         area_html = self._format_area_html(affected_departments)
         polygon_str = self._format_polygon(geometry)
+        self.logger.info(
+            "DB insert sizes — phenomenon text length: %d, area html length: %d, polygon str length: %d",
+            len(phenomenon_text),
+            len(area_html),
+            len(polygon_str),
+        )
+        self.logger.info("polygon str value: %s", polygon_str)
         alert_id = self.mysql_repo.insert_alert(phenomenon_text, area_html, polygon_str)
 
         duration = time.perf_counter() - t0
