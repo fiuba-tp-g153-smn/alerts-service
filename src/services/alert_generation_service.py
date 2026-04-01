@@ -13,6 +13,7 @@ from typing import List
 from shapely import wkb as shapely_wkb
 from shapely.geometry import Point, shape
 
+from domain.models import PolygonTooLargeError
 from ports.mysql_repository import IMySQLRepository
 from services.geo_intersection_service import GeoIntersectionService
 from settings import Settings
@@ -23,7 +24,7 @@ _WORKER_PATH = os.path.join(
 
 # Caps concurrent visualization subprocess launches to prevent simultaneous RAM peaks.
 # Value of 2 (vs 1 for fullres) because viz workers are lighter (~300 MB vs ~2 GB).
-_ALERT_VIZ_SEMAPHORE = asyncio.Semaphore(2)
+_ALERT_VIZ_SEMAPHORE = asyncio.Semaphore(1)
 
 # Module-level cache for dept_index.pkl — immutable during app lifetime (only rebuilt
 # at startup by the scheduler before the app serves requests).
@@ -98,12 +99,20 @@ class AlertGenerationService:  # pylint: disable=too-few-public-methods
         area_html = self._format_area_html(affected_departments)
         polygon_str = self._format_polygon(geometry)
         self.logger.info(
-            "DB insert sizes — phenomenon text length: %d, area html length: %d, polygon str length: %d",
+            "Final polygon sizes; phenomenon text length: %d, area html length: %d, polygon str length: %d",
             len(phenomenon_text),
             len(area_html),
             len(polygon_str),
         )
         self.logger.info("polygon str value: %s", polygon_str)
+
+        if len(polygon_str) > self.settings.polygon_db_max_chars:
+            raise PolygonTooLargeError(
+                f"Polygon serialization is {len(polygon_str)} characters"
+                f", exceeds DB column limit of {self.settings.polygon_db_max_chars}."
+                " Use more aggresive simplification to reduce the number of vertices in the input polygon."
+            )
+
         alert_id = self.mysql_repo.insert_alert(phenomenon_text, area_html, polygon_str)
 
         duration = time.perf_counter() - t0

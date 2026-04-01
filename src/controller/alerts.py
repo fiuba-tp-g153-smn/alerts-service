@@ -8,6 +8,7 @@ from fastapi.responses import JSONResponse
 
 from container import get_alert_service, get_logger, get_mysql_repo
 from controller.schemas import GeoJSONInput, Phenomenon
+from domain.models import PolygonTooLargeError
 from ports.mysql_repository import IMySQLRepository
 from services.alert_generation_service import AlertGenerationService
 
@@ -53,6 +54,9 @@ async def generate_alert(
             f" in {elapsed:.3f}s"
         )
         return JSONResponse(content=result)
+    except PolygonTooLargeError as e:
+        logger.error(f"generate_alert: polygon too large: {e}")
+        raise HTTPException(status_code=400, detail=str(e)) from e
     except ValueError as e:
         logger.warning(f"generate_alert: bad request: {e}")
         raise HTTPException(status_code=400, detail=str(e)) from e

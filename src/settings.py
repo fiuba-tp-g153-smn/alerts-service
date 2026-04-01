@@ -55,6 +55,7 @@ class Settings:  # pylint: disable=too-many-instance-attributes,too-few-public-m
     output_dir: str = ""
     alert_cache_dir: str = ""
     alert_simplification_level: int = 4
+    polygon_db_max_chars: int = 1000
 
     def __init__(self):
         self._load_from_env()
@@ -73,6 +74,7 @@ class Settings:  # pylint: disable=too-many-instance-attributes,too-few-public-m
         raw = data.get("simplification_levels", {})
         self.simplification_levels = {int(k): float(v) for k, v in raw.items()}
         self.alert_simplification_level = int(data.get("alert_simplification_level", 4))
+        self.polygon_db_max_chars = int(data.get("polygon_db_max_chars", 5000))
 
     def _load_from_env(self) -> None:
         self.log_level = os.getenv("LOG_LEVEL", self.log_level)
@@ -126,6 +128,7 @@ class Settings:  # pylint: disable=too-many-instance-attributes,too-few-public-m
             logger.info("SIMPLIFICATION_LEVEL_%s: %s", level, tolerance)
 
         logger.info("ALERT_SIMPLIFICATION_LEVEL: %s", self.alert_simplification_level)
+        logger.info("POLYGON_DB_MAX_CHARS: %s", self.polygon_db_max_chars)
         logger.info("S3_ENDPOINT: %s", self.s3_endpoint)
         logger.info("S3_BUCKET_NAME: %s", self.s3_bucket_name)
         logger.info("S3_SECURE: %s", self.s3_secure)
