@@ -23,13 +23,17 @@ _WORKER_PATH = os.path.join(
 )
 
 # Caps concurrent visualization subprocess launches to prevent simultaneous RAM peaks.
-# Value of 2 (vs 1 for fullres) because viz workers are lighter (~300 MB vs ~2 GB).
-_ALERT_VIZ_SEMAPHORE = asyncio.Semaphore(1)
+# Value of 2: safe now that dept/prov indices are cached in-process and passed via
+# payload (workers no longer load pickle files from disk independently).
+_ALERT_VIZ_SEMAPHORE = asyncio.Semaphore(2)
 
 # Module-level cache for dept_index.pkl — immutable during app lifetime (only rebuilt
 # at startup by the scheduler before the app serves requests).
 _DEPT_INDEX_CACHE: list | None = None
 _DEPT_INDEX_LOCK = asyncio.Lock()
+
+_PROV_INDEX_CACHE: list | None = None
+_PROV_INDEX_LOCK = asyncio.Lock()
 
 
 class AlertGenerationService:  # pylint: disable=too-few-public-methods
@@ -99,7 +103,8 @@ class AlertGenerationService:  # pylint: disable=too-few-public-methods
         area_html = self._format_area_html(affected_departments)
         polygon_str = self._format_polygon(geometry)
         self.logger.info(
-            "Final polygon sizes; phenomenon text length: %d, area html length: %d, polygon str length: %d",
+            "Final polygon sizes; phenomenon text length: %d, "
+            "area html length: %d, polygon str length: %d",
             len(phenomenon_text),
             len(area_html),
             len(polygon_str),
@@ -109,8 +114,10 @@ class AlertGenerationService:  # pylint: disable=too-few-public-methods
         if len(polygon_str) > self.settings.polygon_db_max_chars:
             raise PolygonTooLargeError(
                 f"Polygon serialization is {len(polygon_str)} characters"
-                f", exceeds DB column limit of {self.settings.polygon_db_max_chars}."
-                " Use more aggresive simplification to reduce the number of vertices in the input polygon."
+                f", exceeds DB column limit of"
+                f" {self.settings.polygon_db_max_chars}."
+                " Use more aggresive simplification to reduce"
+                " the number of vertices in the input polygon."
             )
 
         alert_id = self.mysql_repo.insert_alert(phenomenon_text, area_html, polygon_str)
@@ -199,6 +206,20 @@ class AlertGenerationService:  # pylint: disable=too-few-public-methods
         return _DEPT_INDEX_CACHE
 
     @staticmethod
+    async def _get_prov_index(prov_index_path: str) -> list | None:
+        """Return cached prov_index, loading from disk on first call."""
+        global _PROV_INDEX_CACHE  # pylint: disable=global-statement
+        if not os.path.exists(prov_index_path):
+            return None
+        if _PROV_INDEX_CACHE is None:
+            async with _PROV_INDEX_LOCK:
+                if _PROV_INDEX_CACHE is None:
+                    _PROV_INDEX_CACHE = await asyncio.to_thread(
+                        AlertGenerationService._load_dept_index, prov_index_path
+                    )
+        return _PROV_INDEX_CACHE
+
+    @staticmethod
     def _compute_spatial_filter(
         input_geom, dept_index: list, all_departments: list, umbral: float
     ) -> list:
@@ -249,6 +270,19 @@ class AlertGenerationService:  # pylint: disable=too-few-public-methods
         all_departments,
     ) -> dict:
         """Run visualization in isolated subprocess (follows fullres_worker pattern)."""
+        dept_index_path = os.path.join(self.settings.alert_cache_dir, "dept_index.pkl")
+        prov_index_path = os.path.join(self.settings.alert_cache_dir, "prov_index.pkl")
+        dept_index = await self._get_dept_index(dept_index_path)
+        prov_index = await self._get_prov_index(prov_index_path)
+
+        dept_index_serialized = [
+            {"bbox": list(bbox), "wkb_hex": shapely_wkb.dumps(geom, hex=True)}
+            for bbox, geom in (dept_index or [])
+        ]
+        prov_geoms_serialized = [
+            shapely_wkb.dumps(geom, hex=True) for _, geom in (prov_index or [])
+        ]
+
         payload = json.dumps(
             {
                 "geometry_wkb_hex": shapely_wkb.dumps(shape(geometry), hex=True),
@@ -258,6 +292,8 @@ class AlertGenerationService:  # pylint: disable=too-few-public-methods
                 "all_departments": all_departments,
                 "output_dir": self.settings.output_dir,
                 "cache_dir": self.settings.alert_cache_dir,
+                "dept_index_serialized": dept_index_serialized,
+                "prov_geoms_serialized": prov_geoms_serialized,
             }
         )
 

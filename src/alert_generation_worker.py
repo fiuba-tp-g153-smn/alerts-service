@@ -54,6 +54,31 @@ def _load_index(path: str) -> list:
         return pickle.load(f)
 
 
+def _load_spatial_indices(payload: dict, cache_dir: str) -> tuple:
+    """Deserialize spatial indices from payload, falling back to disk."""
+    dept_index_serialized = payload.get("dept_index_serialized")
+    prov_geoms_serialized = payload.get("prov_geoms_serialized")
+
+    if dept_index_serialized is not None:
+        dept_index = [
+            (tuple(item["bbox"]), shapely_wkb.loads(item["wkb_hex"], hex=True))
+            for item in dept_index_serialized
+        ]
+    else:
+        dept_index = _load_index(os.path.join(cache_dir, "dept_index.pkl"))
+    dept_geoms_all = [geom for _, geom in dept_index]
+
+    if prov_geoms_serialized is not None:
+        prov_geoms = [
+            shapely_wkb.loads(wkb_hex, hex=True) for wkb_hex in prov_geoms_serialized
+        ]
+    else:
+        prov_index = _load_index(os.path.join(cache_dir, "prov_index.pkl"))
+        prov_geoms = [g for _, g in prov_index]
+
+    return dept_index, dept_geoms_all, prov_geoms
+
+
 def _dept_geoms_en_bbox(dept_index: list, lon_o, lon_e, lat_s, lat_n) -> list:
     """Filter department geometries that overlap the given bounding box."""
     return [
@@ -392,11 +417,10 @@ def main():
         # Ensure output directory exists
         os.makedirs(output_dir, exist_ok=True)
 
-        # Load spatial indices from cache
-        dept_index = _load_index(os.path.join(cache_dir, "dept_index.pkl"))
-        prov_index = _load_index(os.path.join(cache_dir, "prov_index.pkl"))
-        prov_geoms = [g for _, g in prov_index]
-        dept_geoms_all = [g for _, g in dept_index]
+        # Load spatial indices (from payload cache or disk fallback)
+        dept_index, dept_geoms_all, prov_geoms = _load_spatial_indices(
+            payload, cache_dir
+        )
 
         # Decode geometry
         geom = shapely_wkb.loads(geometry_wkb_hex, hex=True)

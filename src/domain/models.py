@@ -1,12 +1,12 @@
 """Domain models for geographic layers and job results."""
 
-
-class PolygonTooLargeError(ValueError):
-    """Raised when the serialized polygon exceeds the database column limit."""
-
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import List, Optional
+
+
+class PolygonTooLargeError(ValueError):
+    """Raised when the serialized polygon exceeds the database column limit."""
 
 
 class LayerType(Enum):
