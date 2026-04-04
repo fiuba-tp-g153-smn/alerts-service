@@ -223,7 +223,7 @@ def generar_gif_area(  # pylint: disable=too-many-locals
         cast(Any, ax).outline_patch.set_visible(False)
 
     # Base layers
-    ax.add_feature(cfeature.OCEAN.with_scale("50m"), facecolor="#B0D8E8", zorder=0)
+    ax.add_feature(cfeature.OCEAN.with_scale("50m"), facecolor="#e1f1f4", zorder=0)
     ax.add_feature(cfeature.LAND.with_scale("50m"), facecolor="white", zorder=1)
     ax.add_feature(
         cfeature.BORDERS.with_scale("50m"), edgecolor="black", linewidth=1.8, zorder=4
@@ -357,7 +357,7 @@ def generar_gif_general(text, coords, timestamp, output_dir, dept_geoms, prov_ge
         cast(Any, ax_map).outline_patch.set_visible(False)
 
     # Base layers
-    ax_map.add_feature(cfeature.OCEAN.with_scale("50m"), facecolor="#B0D8E8", zorder=0)
+    ax_map.add_feature(cfeature.OCEAN.with_scale("50m"), facecolor="#e1f1f4", zorder=0)
     ax_map.add_feature(cfeature.LAND.with_scale("50m"), facecolor="white", zorder=1)
     ax_map.add_feature(
         cfeature.BORDERS.with_scale("50m"), edgecolor="black", linewidth=1.8, zorder=4
