@@ -37,6 +37,7 @@ import matplotlib.patches as mpatches
 import matplotlib.patheffects as pe
 from cartopy.mpl.geoaxes import GeoAxes
 from matplotlib.patches import Polygon as MplPolygon
+from matplotlib.font_manager import FontProperties
 from PIL import Image
 from shapely import wkb as shapely_wkb
 from shapely.geometry import Polygon
@@ -45,6 +46,22 @@ matplotlib.use("Agg")  # must precede pyplot import
 
 import matplotlib.pyplot as plt  # pylint: disable=wrong-import-position,import-error,ungrouped-imports
 
+FONT_BLACK = FontProperties(fname="/app/data_mapas/EncodeSans-Black.ttf")
+FONT_MEDIUM = FontProperties(fname="/app/data_mapas/EncodeSans-Medium.ttf")
+FONT_SEMIBOLD = FontProperties(fname="/app/data_mapas/EncodeSans-SemiBold.ttf")
+WATERMARK_PATH = "/app/data_mapas/logo_smn.png"
+
+def _agregar_marca_de_agua(fig):
+    """Add a low-opacity watermark over the entire map."""
+    if os.path.exists(WATERMARK_PATH):
+        img = plt.imread(WATERMARK_PATH)
+        # Añadir el eje con 'facecolor="none"' para que sea 100% transparente
+        ax_wm = fig.add_axes([0, 0.01, 1, 0.86], facecolor="none")
+        ax_wm.set_zorder(100)
+        ax_wm.axis("off")
+        ax_wm.imshow(img, aspect="auto", alpha=0.3, zorder=100)
+    else:
+        print(f"ATENCION: No se encontró el logo en la ruta: {WATERMARK_PATH}", file=sys.stderr)
 
 def _load_index(path: str) -> list:
     """Load spatial index from pickle file, return empty list if missing."""
@@ -89,43 +106,50 @@ def _dept_geoms_en_bbox(dept_index: list, lon_o, lon_e, lat_s, lat_n) -> list:
 
 
 def _panel_aviso(fig, texto, modo="area"):
-    """Add white header panel with red border containing alert text."""
+    """Add header panel with alert text."""
     ax2 = fig.add_axes([0.0, 0.86, 1.0, 0.14])
     ax2.set_xlim(0, 1)
     ax2.set_ylim(0, 1)
     ax2.axis("off")
 
-    # White box with red border
+    # 1. Recuadro inferio (Fenómeno)
     ax2.add_patch(
-        mpatches.FancyBboxPatch(
+        mpatches.Rectangle(
             (0, 0),
             1,
-            1,
+            0.52,
             facecolor="white",
             edgecolor="red",
             linewidth=2.5,
-            boxstyle="square,pad=0",
             transform=ax2.transAxes,
             clip_on=False,
         )
     )
 
-    # Horizontal divider
-    ax2.axhline(y=0.52, color="red", linewidth=1.2)
+    # 2. Recuadro superior (Título)
+    ax2.add_patch(
+        mpatches.Rectangle(
+            (0, 0.52),
+            1,
+            0.48,
+            facecolor="#ffb71b",
+            edgecolor="none",
+            transform=ax2.transAxes,
+            clip_on=False,
+        )
+    )
 
-    # Title (monospace font)
+    # Título
     ax2.text(
         0.5,
         0.76,
         "AVISO A CORTO PLAZO",
         ha="center",
         va="center",
-        fontsize=22,
-        fontweight="bold",
+        fontsize=28,
         color="#000000",
-        fontfamily="monospace",
-        fontstyle="normal",
-        antialiased=False,
+        fontproperties=FONT_BLACK,
+        antialiased=True,
         transform=ax2.transAxes,
     )
 
@@ -137,43 +161,37 @@ def _panel_aviso(fig, texto, modo="area"):
             ha="right",
             va="center",
             fontsize=11,
-            fontweight="bold",
-            fontstyle="italic",
-            fontfamily="monospace",
-            antialiased=False,
             color="#000000",
+            fontproperties=FONT_MEDIUM,
+            antialiased=True,
             transform=ax2.transAxes,
         )
 
-    # Description (serif font)
+    # Descripción estática
     ax2.text(
         0.02,
         0.44,
         "EL AREA GRAFICADA EN EL MAPA DELIMITA LA OCURRENCIA DE:",
         ha="left",
         va="top",
-        fontsize=12,
-        fontstyle="italic",
-        fontfamily="serif",
-        fontweight="bold",
-        antialiased=False,
+        fontsize=15,
         color="#000000",
+        fontproperties=FONT_MEDIUM,
+        antialiased=True,
         transform=ax2.transAxes,
     )
 
-    # Phenomenon text (red, serif, italic)
+    # Texto del fenómeno
     ax2.text(
         0.5,
         0.14,
         texto,
         ha="center",
         va="center",
-        fontsize=14,
-        fontweight="normal",
-        fontstyle="italic",
-        fontfamily="serif",
-        antialiased=False,
+        fontsize=19,
         color="red",
+        fontproperties=FONT_SEMIBOLD,
+        antialiased=True,
         transform=ax2.transAxes,
     )
 
@@ -304,6 +322,8 @@ def generar_gif_area(  # pylint: disable=too-many-locals
             path_effects=[pe.withStroke(linewidth=2, foreground="white")],
         )
 
+    _agregar_marca_de_agua(fig)
+
     _panel_aviso(fig, text, modo="area")
 
     out = os.path.join(output_dir, f"{timestamp}_aviso.gif")
@@ -312,7 +332,7 @@ def generar_gif_area(  # pylint: disable=too-many-locals
         tmp, format="png", bbox_inches=None, pad_inches=0, facecolor="white", dpi=80
     )
     plt.close(fig)
-    Image.open(tmp).convert("P", palette=Image.Palette.ADAPTIVE).save(out, format="GIF")
+    Image.open(tmp).convert("RGB").convert("P", palette=Image.Palette.ADAPTIVE).save(out, format="GIF")
     os.remove(tmp)
 
     return out
@@ -382,6 +402,8 @@ def generar_gif_general(text, coords, timestamp, output_dir, dept_geoms, prov_ge
         )
     )
 
+    _agregar_marca_de_agua(fig_final)
+
     _panel_aviso(fig_final, text, modo="gral")
 
     out = os.path.join(output_dir, f"{timestamp}_gral.gif")
@@ -390,7 +412,7 @@ def generar_gif_general(text, coords, timestamp, output_dir, dept_geoms, prov_ge
         tmp, format="png", bbox_inches=None, pad_inches=0, facecolor="white", dpi=80
     )
     plt.close(fig_final)
-    Image.open(tmp).convert("P", palette=Image.Palette.ADAPTIVE).save(out, format="GIF")
+    Image.open(tmp).convert("RGB").convert("P", palette=Image.Palette.ADAPTIVE).save(out, format="GIF")
     os.remove(tmp)
 
     return out

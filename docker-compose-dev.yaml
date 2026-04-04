@@ -62,6 +62,7 @@ services:
       - ./data:/app/data
       - ./alembic.ini:/config/alembic.ini:ro
       - ./alembic:/app/alembic:ro
+      - ./data_mapas:/app/data_mapas:ro
       - ./settings.json:/config/settings.json:ro
       - ./output/alerts:/app/output/alerts
     environment:
