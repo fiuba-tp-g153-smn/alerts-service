@@ -153,19 +153,19 @@ def _panel_aviso(fig, texto, modo="area"):
         transform=ax2.transAxes,
     )
 
-    if modo == "gral":
-        ax2.text(
-            0.97,
-            0.80,
-            "ZONA: AREA TOTAL",
-            ha="right",
-            va="center",
-            fontsize=11,
-            color="#000000",
-            fontproperties=FONT_MEDIUM,
-            antialiased=True,
-            transform=ax2.transAxes,
-        )
+    # if modo == "gral":
+    #     ax2.text(
+    #         0.90,
+    #         0.80,
+    #         "ZONA: AREA TOTAL",
+    #         ha="right",
+    #         va="center",
+    #         fontsize=14,
+    #         color="#000000",
+    #         fontproperties=FONT_MEDIUM,
+    #         antialiased=True,
+    #         transform=ax2.transAxes,
+    #     )
 
     # Descripción estática
     ax2.text(
