@@ -349,7 +349,19 @@ def generar_gif_general(text, coords, timestamp, output_dir, dept_geoms, prov_ge
     ax_map: GeoAxes = cast(
         GeoAxes, fig_final.add_axes((0, 0.01, 1, 0.86), projection=proj)
     )
-    ax_map.set_extent([-78, -51, -56, -21], crs=ccrs.PlateCarree())
+    
+    # Determinar hasta qué latitud (Sur) llega el polígono
+    min_lat_poly = min(lats)
+
+    # Si el polígono entra en la porción 3 (Sur de -44.3°), mostramos el país completo (1, 2 y 3)
+    if min_lat_poly < -44.3:
+        extent = [-78, -51, -56, -21]
+    else:
+        # Si está en el Norte/Centro, mostramos solo las porciones 1 y 2.
+        # Ajustamos también mínimamente las longitudes para aprovechar el ancho al hacer el zoom.
+        extent = [-75.5, -53, -46.5, -21]
+
+    ax_map.set_extent(extent, crs=ccrs.PlateCarree())
 
     try:
         ax_map.spines["geo"].set_visible(False)
@@ -360,10 +372,10 @@ def generar_gif_general(text, coords, timestamp, output_dir, dept_geoms, prov_ge
     ax_map.add_feature(cfeature.OCEAN.with_scale("50m"), facecolor="#e1f1f4", zorder=0)
     ax_map.add_feature(cfeature.LAND.with_scale("50m"), facecolor="white", zorder=1)
     ax_map.add_feature(
-        cfeature.BORDERS.with_scale("50m"), edgecolor="black", linewidth=1.8, zorder=4
+        cfeature.BORDERS.with_scale("50m"), edgecolor="black", linewidth=2.5, zorder=4
     )
     ax_map.add_feature(
-        cfeature.COASTLINE.with_scale("50m"), edgecolor="black", linewidth=1.4, zorder=4
+        cfeature.COASTLINE.with_scale("50m"), edgecolor="black", linewidth=2.5, zorder=4
     )
 
     # All department boundaries
