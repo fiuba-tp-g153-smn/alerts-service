@@ -16,7 +16,7 @@ RUN pip install --no-cache-dir "poetry==2.3.2" && poetry config virtualenvs.crea
 # Install all dependencies, tests need dev dependencies as well
 # "--no-root" avoids installing this project package itself, since tests usually run against
 # the source code rather than an installed package
-RUN (poetry check --lock || poetry lock) && poetry install --no-root --no-ansi
+RUN (poetry check --lock || poetry lock) && poetry install --no-root --no-ansi --no-cache
 
 # Copy the rest of the project files (source code, tests, configs, etc.)
 COPY . .

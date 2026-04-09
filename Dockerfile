@@ -21,14 +21,11 @@ COPY pyproject.toml poetry.lock /app/
 RUN pip install --no-cache-dir "poetry==2.3.2" && poetry config virtualenvs.create false
 
 # Re-generate lock file if it is outdated, then install all dependencies (except dev/test deps)
-RUN (poetry check --lock || poetry lock) && poetry install --without dev --no-root --no-ansi
+RUN (poetry check --lock || poetry lock) && poetry install --without dev --no-root --no-ansi --no-cache
 
 # Pre-download Natural Earth 50m data during build (saves ~100MB download at runtime)
-RUN python -c "import cartopy.io.shapereader as sr; \
-    combos = [('physical','coastline'),('physical','land'),('physical','ocean'),\
-              ('cultural','admin_0_boundary_lines_land')]; \
-    [list(sr.Reader(sr.natural_earth('50m',c,n)).geometries()) for c,n in combos]; \
-    print('Natural Earth 50m cached')"
+COPY scripts/cache_natural_earth.py /tmp/cache_natural_earth.py
+RUN python /tmp/cache_natural_earth.py && rm /tmp/cache_natural_earth.py
 
 ################################
 # Stage 2: Runtime
