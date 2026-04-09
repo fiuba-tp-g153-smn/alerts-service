@@ -18,7 +18,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY pyproject.toml poetry.lock /app/
 
 # Install Poetry, disable venvs to install into system site-packages
-RUN pip install --no-cache-dir "poetry" && poetry config virtualenvs.create false
+RUN pip install --no-cache-dir "poetry==2.3.2" && poetry config virtualenvs.create false
 
 # Re-generate lock file if it is outdated, then install all dependencies (except dev/test deps)
 RUN (poetry check --lock || poetry lock) && poetry install --without dev --no-root --no-ansi
@@ -39,9 +39,9 @@ WORKDIR /app
 
 # Install runtime dependencies for matplotlib/cartopy
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    libgeos-c1v5 libproj25 \
-    libgdal-dev \
-    libspatialindex-dev \
+    libgeos-c1t64 libproj25 \
+    libgdal36 \
+    libspatialindex-c8 \
     fonts-dejavu-core \
     && rm -rf /var/lib/apt/lists/*
 
