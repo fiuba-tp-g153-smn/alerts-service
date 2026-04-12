@@ -23,13 +23,6 @@ RUN pip install --no-cache-dir "poetry" && poetry config virtualenvs.create fals
 # Re-generate lock file if it is outdated, then install all dependencies (except dev/test deps)
 RUN (poetry check --lock || poetry lock) && poetry install --without dev --no-root --no-ansi
 
-# Pre-download Natural Earth 50m data during build (saves ~100MB download at runtime)
-RUN python -c "import cartopy.io.shapereader as sr; \
-    combos = [('physical','coastline'),('physical','land'),('physical','ocean'),\
-              ('cultural','admin_0_boundary_lines_land')]; \
-    [list(sr.Reader(sr.natural_earth('50m',c,n)).geometries()) for c,n in combos]; \
-    print('Natural Earth 50m cached')"
-
 ################################
 # Stage 2: Runtime
 ################################
@@ -52,9 +45,6 @@ ENV PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION=python
 COPY --from=builder /usr/local/lib/python3.13/site-packages /usr/local/lib/python3.13/site-packages
 COPY --from=builder /usr/local/bin /usr/local/bin
 
-# Copy Natural Earth cache from builder
-COPY --from=builder /root/.local/share/cartopy /root/.local/share/cartopy
-
 # Create output directories
 RUN mkdir -p /app/output/alerts /app/cache
 
@@ -65,6 +55,9 @@ COPY alembic /app/alembic
 
 # Copy settings file
 COPY settings.json /config/settings.json
+
+# Copy font, logo assets and IGN shapefiles
+COPY ./data_mapas /app/data_mapas
 
 # Copy entrypoint script
 COPY entrypoint.sh /entrypoint.sh

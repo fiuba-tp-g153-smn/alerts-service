@@ -31,7 +31,6 @@ import sys
 from typing import Any, cast
 
 import cartopy.crs as ccrs
-import cartopy.feature as cfeature
 import matplotlib
 import matplotlib.patches as mpatches
 import matplotlib.patheffects as pe
@@ -46,10 +45,49 @@ matplotlib.use("Agg")  # must precede pyplot import
 
 import matplotlib.pyplot as plt  # pylint: disable=wrong-import-position,import-error,ungrouped-imports
 
+# ---------------------------------------------------------------------------
+# Paths
+# ---------------------------------------------------------------------------
 FONT_BLACK = FontProperties(fname="/app/data_mapas/EncodeSans-Black.ttf")
 FONT_MEDIUM = FontProperties(fname="/app/data_mapas/EncodeSans-Medium.ttf")
 FONT_SEMIBOLD = FontProperties(fname="/app/data_mapas/EncodeSans-SemiBold.ttf")
 WATERMARK_PATH = "/app/data_mapas/logo_smn.png"
+
+_IGN: dict | None = None  # loaded lazily on first call inside main()
+
+
+# ---------------------------------------------------------------------------
+# IGN base-map layers loader
+# ---------------------------------------------------------------------------
+
+def _cargar_capas_ign(cache_path: str) -> dict:
+    """
+    Load IGN geometries from the pre-built pickle.
+    Falls back to an empty dict if the pickle does not exist yet
+    (allows the worker to run even before the cache is ready).
+    """
+    empty: dict = {
+        "grupo_a": [], "grupo_b": [], "grupo_c": [], "grupo_d": [],
+        "provincias": [], "paises": [], "toponimos": [],
+    }
+    if not os.path.exists(cache_path):
+        print(
+            f"ATENCION: {cache_path} no encontrado. Mapa base IGN omitido.",
+            file=sys.stderr,
+        )
+        return empty
+
+    with open(cache_path, "rb") as f:
+        raw: dict = pickle.load(f)
+
+    # Deserialise WKB hex → shapely geometries (excepto 'toponimos' que son dicts)
+    capas: dict = {}
+    for key, wkb_list in raw.items():
+        if key == "toponimos":
+            capas[key] = wkb_list  # ya son dicts {lon, lat, nombre, tipo}
+        else:
+            capas[key] = [shapely_wkb.loads(w, hex=True) for w in wkb_list]
+    return capas
 
 def _agregar_marca_de_agua(fig):
     """Add a low-opacity watermark over the entire map."""
@@ -62,6 +100,7 @@ def _agregar_marca_de_agua(fig):
         ax_wm.imshow(img, aspect="auto", alpha=0.3, zorder=100)
     else:
         print(f"ATENCION: No se encontró el logo en la ruta: {WATERMARK_PATH}", file=sys.stderr)
+
 
 def _load_index(path: str) -> list:
     """Load spatial index from pickle file, return empty list if missing."""
@@ -112,7 +151,7 @@ def _panel_aviso(fig, texto, modo="area"):
     ax2.set_ylim(0, 1)
     ax2.axis("off")
 
-    # 1. Recuadro inferio (Fenómeno)
+    # 1. Recuadro inferior (Fenómeno)
     ax2.add_patch(
         mpatches.Rectangle(
             (0, 0),
@@ -153,20 +192,6 @@ def _panel_aviso(fig, texto, modo="area"):
         transform=ax2.transAxes,
     )
 
-    # if modo == "gral":
-    #     ax2.text(
-    #         0.90,
-    #         0.80,
-    #         "ZONA: AREA TOTAL",
-    #         ha="right",
-    #         va="center",
-    #         fontsize=14,
-    #         color="#000000",
-    #         fontproperties=FONT_MEDIUM,
-    #         antialiased=True,
-    #         transform=ax2.transAxes,
-    #     )
-
     # Descripción estática
     ax2.text(
         0.02,
@@ -196,6 +221,146 @@ def _panel_aviso(fig, texto, modo="area"):
     )
 
 
+def _agregar_capas_ign(ax: GeoAxes, modo: str = "area") -> None:
+    """
+    Dibuja el mapa base IGN sobre el eje cartopy dado.
+
+    Orden de capas (zorder):
+      0  - fondo de agua (color de fondo del eje)
+      1  - países limítrofes (polígono relleno)
+      2  - provincias argentinas (polígono relleno blanco)
+      3  - límites Grupo B: interprovincial + costa (línea delgada)
+      4  - límites Grupo A: internacionales + lateral marítimo + lecho RdlP
+      5  - límites Grupo C: exterior Río de la Plata (línea punteada)
+      6  - límites Grupo D: sector antártico (línea especial)
+
+    El fondo de agua se logra seteando el facecolor del eje antes de llamar
+    a esta función.
+    """
+    pc = ccrs.PlateCarree()
+
+    # Países limítrofes (polígono relleno + borde para mostrar fronteras entre
+    # países vecinos, que no están en limites.shp ya que ese solo contiene
+    # los límites de Argentina con sus vecinos, no los límites entre vecinos)
+    if _IGN["paises"]:
+        lw_paises = 0.8 if modo == "area" else 1.0
+        ax.add_geometries(
+            _IGN["paises"],
+            crs=pc,
+            facecolor="#bebebe",
+            edgecolor="#888888",
+            linewidth=lw_paises,
+            zorder=1,
+        )
+
+    # Provincias argentinas — fondo blanco
+    if _IGN["provincias"]:
+        ax.add_geometries(
+            _IGN["provincias"],
+            crs=pc,
+            facecolor="white",
+            edgecolor="none",
+            zorder=2,
+        )
+
+    # Grupo B: Límite Interprovincial + Línea de costa
+    # Línea continua delgada (misma simbología)
+    if _IGN["grupo_b"]:
+        lw_b = 0.9 if modo == "area" else 1.2
+        ax.add_geometries(
+            _IGN["grupo_b"],
+            crs=pc,
+            facecolor="none",
+            edgecolor="#333333",
+            linewidth=lw_b,
+            zorder=3,
+        )
+
+    # Grupo A: Límite internacional + lecho RdlP + lateral marítimo arg-uru
+    # Línea continua más gruesa
+    if _IGN["grupo_a"]:
+        lw_a = 1.8 if modo == "area" else 2.2
+        ax.add_geometries(
+            _IGN["grupo_a"],
+            crs=pc,
+            facecolor="none",
+            edgecolor="#111111",
+            linewidth=lw_a,
+            zorder=4,
+        )
+
+    # Grupo C: Límite exterior del Río de la Plata — línea punteada
+    if _IGN["grupo_c"]:
+        ax.add_geometries(
+            _IGN["grupo_c"],
+            crs=pc,
+            facecolor="none",
+            edgecolor="#444444",
+            linewidth=1.0,
+            linestyle="dashed",
+            zorder=5,
+        )
+
+    # Grupo D: Sector Antártico — línea punteada distintiva
+    if _IGN["grupo_d"]:
+        ax.add_geometries(
+            _IGN["grupo_d"],
+            crs=pc,
+            facecolor="none",
+            edgecolor="#444444",
+            linewidth=1.0,
+            linestyle=(0, (5, 3, 1, 3)),  # punto-guión
+            zorder=6,
+        )
+
+    # Topónimos: etiquetas de pertenencia "(Arg.)" e islas
+    # Solo en modo 'gral' (mapa del país completo), ya que el modo 'area'
+    # hace zoom a la región afectada y no cubre las zonas de estas islas.
+    if modo == "gral" and _IGN.get("toponimos"):
+        for top in _IGN["toponimos"]:
+            lon, lat, nombre, tipo = top["lon"], top["lat"], top["nombre"], top["tipo"]
+            # Estilo según tipo:
+            #   'arg'      -> solo el texto "(Arg.)", negrita pequeña
+            #   'continen' -> "ISLAS MALVINAS (Arg.)" etc., itálica pequeña
+            #   'isla'     -> nombres de islas del Atlántico Sur, itálica muy pequeña
+            if tipo == "arg":
+                ax.text(
+                    lon, lat, nombre,
+                    transform=ccrs.PlateCarree(),
+                    fontsize=6,
+                    fontweight="bold",
+                    color="#111111",
+                    ha="center", va="center",
+                    clip_on=True,
+                    zorder=10,
+                )
+            elif tipo == "continen":
+                ax.text(
+                    lon, lat, nombre,
+                    transform=ccrs.PlateCarree(),
+                    fontsize=5.5,
+                    fontstyle="italic",
+                    color="#111111",
+                    ha="center", va="center",
+                    clip_on=True,
+                    zorder=10,
+                )
+            elif tipo == "isla":
+                ax.text(
+                    lon, lat, nombre,
+                    transform=ccrs.PlateCarree(),
+                    fontsize=5,
+                    fontstyle="italic",
+                    color="#333333",
+                    ha="center", va="center",
+                    clip_on=True,
+                    zorder=10,
+                )
+
+# ---------------------------------------------------------------------------
+# GIF generation functions
+# ---------------------------------------------------------------------------
+
 def generar_gif_area(  # pylint: disable=too-many-locals
     text,
     coords,
@@ -216,21 +381,15 @@ def generar_gif_area(  # pylint: disable=too-many-locals
     fig = plt.figure(figsize=(13.75, 14), dpi=80)
     ax: GeoAxes = cast(GeoAxes, fig.add_axes((0, 0.01, 1, 0.86), projection=proj))
     ax.set_extent([lon_o, lon_e, lat_s, lat_n], crs=ccrs.PlateCarree())
+    ax.set_facecolor("#e1f1f4")  # color de agua de fondo
 
     try:
         ax.spines["geo"].set_visible(False)
     except KeyError:
         cast(Any, ax).outline_patch.set_visible(False)
 
-    # Base layers
-    ax.add_feature(cfeature.OCEAN.with_scale("50m"), facecolor="#e1f1f4", zorder=0)
-    ax.add_feature(cfeature.LAND.with_scale("50m"), facecolor="white", zorder=1)
-    ax.add_feature(
-        cfeature.BORDERS.with_scale("50m"), edgecolor="black", linewidth=1.8, zorder=4
-    )
-    ax.add_feature(
-        cfeature.COASTLINE.with_scale("50m"), edgecolor="black", linewidth=0.8, zorder=4
-    )
+    # --- Mapa base IGN ---
+    _agregar_capas_ign(ax, modo="area")
 
     # Department boundaries filtered to visible bbox
     dept_vis = _dept_geoms_en_bbox(dept_index, lon_o, lon_e, lat_s, lat_n)
@@ -238,21 +397,23 @@ def generar_gif_area(  # pylint: disable=too-many-locals
         ax.add_geometries(
             dept_vis,
             crs=ccrs.PlateCarree(),
-            edgecolor="black",
+            edgecolor="#555555",
             facecolor="none",
-            linewidth=0.8,
-            zorder=4,
+            linewidth=0.5,
+            zorder=7,
         )
 
-    # Province boundaries (all, thicker line)
-    if prov_geoms:
+    # Province boundaries from alert cache (all, thicker line) — zorder 8
+    # These are the prov_geoms from the dept/prov spatial index (GeoJSONs),
+    # kept here as a second source in case IGN data is unavailable.
+    if prov_geoms and not _IGN["provincias"]:
         ax.add_geometries(
             prov_geoms,
             crs=ccrs.PlateCarree(),
             edgecolor="black",
             facecolor="none",
             linewidth=1.8,
-            zorder=5,
+            zorder=8,
         )
 
     # Polygon (hatch pattern + border)
@@ -266,7 +427,7 @@ def generar_gif_area(  # pylint: disable=too-many-locals
             linewidth=0,
             hatch="//",
             transform=ccrs.PlateCarree(),
-            zorder=5,
+            zorder=9,
         )
     )
     ax.add_patch(
@@ -277,7 +438,7 @@ def generar_gif_area(  # pylint: disable=too-many-locals
             edgecolor="#CC0000",
             linewidth=2.5,
             transform=ccrs.PlateCarree(),
-            zorder=6,
+            zorder=10,
         )
     )
 
@@ -297,7 +458,7 @@ def generar_gif_area(  # pylint: disable=too-many-locals
         color_txt = "#111111"
         marker = "o" if is_affected else "."
         marker_size = 5 if is_affected else 3.5
-        z_pt, z_txt = (9, 10) if is_affected else (7, 8)
+        z_pt, z_txt = (13, 14) if is_affected else (11, 12)
 
         ax.plot(
             lon,
@@ -349,7 +510,7 @@ def generar_gif_general(text, coords, timestamp, output_dir, dept_geoms, prov_ge
     ax_map: GeoAxes = cast(
         GeoAxes, fig_final.add_axes((0, 0.01, 1, 0.86), projection=proj)
     )
-    
+
     # Determinar hasta qué latitud (Sur) llega el polígono
     min_lat_poly = min(lats)
 
@@ -362,42 +523,36 @@ def generar_gif_general(text, coords, timestamp, output_dir, dept_geoms, prov_ge
         extent = [-75.5, -53, -46.5, -21]
 
     ax_map.set_extent(extent, crs=ccrs.PlateCarree())
+    ax_map.set_facecolor("#e1f1f4")  # color de agua de fondo
 
     try:
         ax_map.spines["geo"].set_visible(False)
     except KeyError:
         cast(Any, ax_map).outline_patch.set_visible(False)
 
-    # Base layers
-    ax_map.add_feature(cfeature.OCEAN.with_scale("50m"), facecolor="#e1f1f4", zorder=0)
-    ax_map.add_feature(cfeature.LAND.with_scale("50m"), facecolor="white", zorder=1)
-    ax_map.add_feature(
-        cfeature.BORDERS.with_scale("50m"), edgecolor="black", linewidth=2.5, zorder=4
-    )
-    ax_map.add_feature(
-        cfeature.COASTLINE.with_scale("50m"), edgecolor="black", linewidth=2.5, zorder=4
-    )
+    # --- Mapa base IGN ---
+    _agregar_capas_ign(ax_map, modo="gral")
 
     # All department boundaries
     if dept_geoms:
         ax_map.add_geometries(
             dept_geoms,
             crs=ccrs.PlateCarree(),
-            edgecolor="black",
+            edgecolor="#555555",
             facecolor="none",
-            linewidth=0.5,
-            zorder=3,
+            linewidth=0.4,
+            zorder=7,
         )
 
-    # All province boundaries (thicker)
-    if prov_geoms:
+    # All province boundaries from alert cache — fallback only if IGN data unavailable
+    if prov_geoms and not _IGN["provincias"]:
         ax_map.add_geometries(
             prov_geoms,
             crs=ccrs.PlateCarree(),
             edgecolor="black",
             facecolor="none",
             linewidth=1.8,
-            zorder=4,
+            zorder=8,
         )
 
     # Polygon (filled with transparency + border)
@@ -410,7 +565,7 @@ def generar_gif_general(text, coords, timestamp, output_dir, dept_geoms, prov_ge
             edgecolor="#CC0000",
             linewidth=2.5,
             transform=ccrs.PlateCarree(),
-            zorder=5,
+            zorder=9,
         )
     )
 
@@ -450,6 +605,12 @@ def main():
 
         # Ensure output directory exists
         os.makedirs(output_dir, exist_ok=True)
+
+        # Load IGN base-map cache (pre-built by scheduler at startup)
+        global _IGN  # pylint: disable=global-statement
+        if _IGN is None:
+            ign_cache = os.path.join(cache_dir, "ign_capas.pkl")
+            _IGN = _cargar_capas_ign(ign_cache)
 
         # Load spatial indices (from payload cache or disk fallback)
         dept_index, dept_geoms_all, prov_geoms = _load_spatial_indices(
