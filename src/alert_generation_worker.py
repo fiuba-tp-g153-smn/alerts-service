@@ -93,11 +93,10 @@ def _agregar_marca_de_agua(fig):
     """Add a low-opacity watermark over the entire map."""
     if os.path.exists(WATERMARK_PATH):
         img = plt.imread(WATERMARK_PATH)
-        # Añadir el eje con 'facecolor="none"' para que sea 100% transparente
-        ax_wm = fig.add_axes([0, 0.01, 1, 0.86], facecolor="none")
+        ax_wm = fig.add_axes([0.05, 0.05, 0.9, 0.9], facecolor="none")
         ax_wm.set_zorder(100)
         ax_wm.axis("off")
-        ax_wm.imshow(img, aspect="auto", alpha=0.3, zorder=100)
+        ax_wm.imshow(img, alpha=0.3, zorder=100)
     else:
         print(f"ATENCION: No se encontró el logo en la ruta: {WATERMARK_PATH}", file=sys.stderr)
 
