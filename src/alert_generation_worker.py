@@ -469,18 +469,22 @@ def generar_gif_area(  # pylint: disable=too-many-locals
             zorder=z_pt,
         )
 
-        ax.text(
-            lon + 0.04,
-            lat + 0.03,
-            department["nom_departamento"],
-            fontsize=7.5,
-            color=color_txt,
-            fontweight="bold",
-            transform=ccrs.PlateCarree(),
-            zorder=z_txt,
-            clip_on=True,
-            path_effects=[pe.withStroke(linewidth=2, foreground="white")],
-        )
+        nom_depto = department["nom_departamento"]
+        is_comuna_caba = nom_depto.lower().startswith("comuna ") and nom_depto[7:].strip().isdigit()
+
+        if not is_comuna_caba:
+            ax.text(
+                lon + 0.04,
+                lat + 0.03,
+                nom_depto,
+                fontsize=7.5,
+                color=color_txt,
+                fontweight="bold",
+                transform=ccrs.PlateCarree(),
+                zorder=z_txt,
+                clip_on=True,
+                path_effects=[pe.withStroke(linewidth=2, foreground="white")],
+            )
 
     _agregar_marca_de_agua(fig)
 
