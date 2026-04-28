@@ -48,10 +48,10 @@ import matplotlib.pyplot as plt  # pylint: disable=wrong-import-position,import-
 # ---------------------------------------------------------------------------
 # Paths
 # ---------------------------------------------------------------------------
-FONT_BLACK = FontProperties(fname="/app/data_mapas/EncodeSans-Black.ttf")
-FONT_MEDIUM = FontProperties(fname="/app/data_mapas/EncodeSans-Medium.ttf")
-FONT_SEMIBOLD = FontProperties(fname="/app/data_mapas/EncodeSans-SemiBold.ttf")
-WATERMARK_PATH = "/app/data_mapas/logo_smn.png"
+FONT_BLACK = FontProperties(fname="/app/data_alerts/EncodeSans-Black.ttf")
+FONT_MEDIUM = FontProperties(fname="/app/data_alerts/EncodeSans-Medium.ttf")
+FONT_SEMIBOLD = FontProperties(fname="/app/data_alerts/EncodeSans-SemiBold.ttf")
+WATERMARK_PATH = "/app/data_alerts/logo_smn.png"
 
 _IGN: dict | None = None  # loaded lazily on first call inside main()
 

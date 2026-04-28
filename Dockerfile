@@ -57,7 +57,7 @@ COPY alembic /app/alembic
 COPY settings.json /config/settings.json
 
 # Copy font, logo assets and IGN shapefiles
-COPY ./data_mapas /app/data_mapas
+COPY ./data_alerts /app/data_alerts
 
 # Copy entrypoint script
 COPY entrypoint.sh /entrypoint.sh

@@ -152,7 +152,7 @@ async def _build_alert_cache(settings, logger: Logger) -> None:
         logger.info(f"  → {count} geometries → {out_name} ({size_mb:.1f} MB)")
 
 
-_DATOS_DIR = "/app/data_mapas"
+_DATOS_DIR = "/app/data_alerts"
 _LIMITES_SHP = os.path.join(_DATOS_DIR, "limites.shp")
 _PROVINCIAS_SHP = os.path.join(_DATOS_DIR, "Provincias.shp")
 _REFERENCIAS_SHP = os.path.join(_DATOS_DIR, "referencias.shp")
