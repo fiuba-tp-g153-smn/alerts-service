@@ -25,10 +25,6 @@ RUN pip install --no-cache-dir "poetry==2.3.2" && poetry config virtualenvs.crea
 # "--no-root": don't install this project as a package itself, we run code mounted in /app
 RUN (poetry check --lock || poetry lock) && poetry install --without dev --no-root --no-cache
 
-# Pre-download Natural Earth 50m data during build (saves ~100MB download at runtime)
-COPY scripts/cache_natural_earth.py /tmp/cache_natural_earth.py
-RUN python /tmp/cache_natural_earth.py && rm /tmp/cache_natural_earth.py
-
 # Create output directories
 RUN mkdir -p /app/output/alerts /app/cache
 

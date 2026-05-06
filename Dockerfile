@@ -23,10 +23,6 @@ RUN pip install --no-cache-dir "poetry==2.3.2" && poetry config virtualenvs.crea
 # Re-generate lock file if it is outdated, then install all dependencies (except dev/test deps)
 RUN (poetry check --lock || poetry lock) && poetry install --without dev --no-root --no-ansi --no-cache
 
-# Pre-download Natural Earth 50m data during build (saves ~100MB download at runtime)
-COPY scripts/cache_natural_earth.py /tmp/cache_natural_earth.py
-RUN python /tmp/cache_natural_earth.py && rm /tmp/cache_natural_earth.py
-
 ################################
 # Stage 2: Runtime
 ################################
@@ -49,9 +45,6 @@ ENV PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION=python
 COPY --from=builder /usr/local/lib/python3.13/site-packages /usr/local/lib/python3.13/site-packages
 COPY --from=builder /usr/local/bin /usr/local/bin
 
-# Copy Natural Earth cache from builder
-COPY --from=builder /root/.local/share/cartopy /root/.local/share/cartopy
-
 # Create output directories
 RUN mkdir -p /app/output/alerts /app/cache
 
@@ -62,6 +55,9 @@ COPY alembic /app/alembic
 
 # Copy settings file
 COPY settings.json /config/settings.json
+
+# Copy font, logo assets and IGN shapefiles
+COPY ./data_alerts /app/data_alerts
 
 # Copy entrypoint script
 COPY entrypoint.sh /entrypoint.sh

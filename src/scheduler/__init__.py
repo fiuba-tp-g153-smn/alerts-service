@@ -10,6 +10,7 @@ from logging import Logger
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
+import geopandas as gpd
 from shapely.geometry import shape as shapely_shape
 
 from adapters.geo_layer_processor import GeoLayerProcessor
@@ -151,6 +152,226 @@ async def _build_alert_cache(settings, logger: Logger) -> None:
         logger.info(f"  → {count} geometries → {out_name} ({size_mb:.1f} MB)")
 
 
+_DATOS_DIR = "/app/data_alerts"
+_LIMITES_SHP = os.path.join(_DATOS_DIR, "limites.shp")
+_PROVINCIAS_SHP = os.path.join(_DATOS_DIR, "Provincias.shp")
+_REFERENCIAS_SHP = os.path.join(_DATOS_DIR, "referencias.shp")
+_TOPONIMOS_SHP = os.path.join(_DATOS_DIR, "toponimos.shp")
+
+# Simplification tolerance for IGN geometries in the cache.
+# 0.005° ≈ 500 m: invisible at national/regional scale, reduces cache size ~95 %.
+_IGN_SIMPLIFY_TOLERANCE = 0.005
+
+
+def _leer_toponimos_manual(shp_path: str, logger: Logger) -> list:
+    """Lee toponimos.shp sin geopandas/pyogrio para evitar el error de encoding latin-1.
+
+    Parsea el DBF con latin-1 vía stdlib y extrae coordenadas PointZ del SHP.
+    Filtra solo los tipos relevantes para el mapa: 'arg', 'continen' (con Arg.),
+    e 'isla'.
+    """
+    import struct
+
+    dbf_path = shp_path.replace(".shp", ".dbf")
+
+    # --- Leer atributos del DBF (latin-1) ------------------------------------
+    attrs: list = []
+    try:
+        with open(dbf_path, "rb") as f:
+            hdr = f.read(32)
+            num_recs = struct.unpack("<I", hdr[4:8])[0]
+            hdr_size = struct.unpack("<H", hdr[8:10])[0]
+            rec_size = struct.unpack("<H", hdr[10:12])[0]
+
+            fields: list = []
+            while True:
+                fd = f.read(32)
+                if not fd or fd[0] == 0x0D:
+                    break
+                fname = fd[:11].rstrip(b"\x00").decode("ascii", errors="replace")
+                ftype = chr(fd[11])
+                flen = fd[16]
+                fields.append((fname, ftype, flen))
+
+            f.seek(hdr_size)
+            for _ in range(num_recs):
+                flag = f.read(1)
+                rec: dict = {}
+                for fname, ftype, flen in fields:
+                    raw = f.read(flen)
+                    if ftype == "C":
+                        rec[fname] = raw.rstrip(b"\x00 ").decode("latin-1", errors="replace")
+                    elif ftype in ("N", "F"):
+                        try:
+                            rec[fname] = float(raw.strip()) if raw.strip() else None
+                        except ValueError:
+                            rec[fname] = None
+                    else:
+                        rec[fname] = raw.rstrip(b"\x00").decode("latin-1", errors="replace")
+                if flag != b"*":  # no es registro eliminado
+                    attrs.append(rec)
+    except Exception as exc:
+        logger.warning("No se pudo leer %s: %s", dbf_path, exc)
+        return []
+
+    # --- Leer coordenadas del SHP (PointZ = tipo 13, Point = tipo 1) ---------
+    coords: list = []
+    try:
+        with open(shp_path, "rb") as f:
+            shp_hdr = f.read(100)
+            file_len = struct.unpack(">I", shp_hdr[24:28])[0] * 2
+            while f.tell() < file_len:
+                rec_hdr = f.read(8)
+                if len(rec_hdr) < 8:
+                    break
+                content_len = struct.unpack(">I", rec_hdr[4:8])[0] * 2
+                content = f.read(content_len)
+                if len(content) < 4:
+                    coords.append((None, None))
+                    continue
+                stype = struct.unpack("<i", content[:4])[0]
+                if stype in (1, 13) and len(content) >= 20:  # Point o PointZ
+                    x, y = struct.unpack("<dd", content[4:20])
+                    coords.append((round(x, 4), round(y, 4)))
+                else:
+                    coords.append((None, None))
+    except Exception as exc:
+        logger.warning("No se pudo leer %s: %s", shp_path, exc)
+        return []
+
+    # --- Combinar y filtrar --------------------------------------------------
+    TIPOS = {"arg", "continen", "isla"}
+    EXCLUIR = {"ISLAS AURORA (Arg.)", "ISLAS GEORGIAS DEL SUR (Arg.)", "ISLAS SANDWICH DEL SUR (Arg.)"}
+    resultado: list = []
+    for (lon, lat), attr in zip(coords, attrs):
+        if lon is None:
+            continue
+        tipo = str(attr.get("tipo", "") or "")
+        nombre = str(attr.get("nombre", "") or "")
+        if tipo not in TIPOS:
+            continue
+        if tipo == "continen" and "(Arg.)" not in nombre:
+            continue
+        if nombre in EXCLUIR:
+            continue
+        # Malvinas: mostrar solo "(Arg.)" sin el nombre completo
+        if nombre == "ISLAS MALVINAS (Arg.)":
+            nombre = "(Arg.)"
+        resultado.append({"lon": lon, "lat": lat, "nombre": nombre, "tipo": tipo})
+
+    logger.info("Toponimos cargados: %d etiquetas (Arg.) + islas", len(resultado))
+    return resultado
+
+
+def _build_ign_cache_sync(cache_dir: str, logger: Logger) -> None:
+    """Read IGN shapefiles, simplify geometries, and persist to ign_capas.pkl.
+
+    Groups:
+      grupo_a – internacional + lecho RdlP + lateral marítimo arg-uru  (solid thick)
+      grupo_b – interprovincial + línea de costa                        (solid thin)
+      grupo_c – exterior Río de la Plata                                (dashed)
+      grupo_d – sector antártico (by NAM)                               (dot-dash)
+      provincias – province polygons                                    (fill white)
+      paises    – neighbouring countries (tipo='país')                  (fill grey)
+      toponimos – point labels: (Arg.) markers + island/country names   (text)
+    """
+    if not os.path.exists(_LIMITES_SHP):
+        logger.warning("IGN shapefiles not found at %s — skipping ign_capas.pkl", _DATOS_DIR)
+        return
+
+    out_path = os.path.join(cache_dir, "ign_capas.pkl")
+    logger.info("Building ign_capas.pkl from IGN shapefiles ...")
+
+    tol = _IGN_SIMPLIFY_TOLERANCE
+
+    def _simplify_wkb(geoms) -> list:
+        """Simplify and serialise a list of shapely geometries to WKB hex strings."""
+        result = []
+        for g in geoms:
+            if g is None or g.is_empty:
+                continue
+            sg = g.simplify(tol, preserve_topology=True)
+            if not sg.is_empty:
+                result.append(sg.wkb_hex)
+        return result
+
+    # --- limites.shp ---------------------------------------------------------
+    lim = gpd.read_file(_LIMITES_SHP)
+    obj_col = "Objeto" if "Objeto" in lim.columns else "objeto"
+    nam_col = "NAM" if "NAM" in lim.columns else "nam"
+
+    GRUPO_A = {"Límite internacional", "Límite del lecho y subsuelo del Río de la Plata",
+                "Límite lateral marítimo argentino-uruguayo"}
+    GRUPO_B = {"Límite Interprovincial", "Línea de costa"}
+    GRUPO_C = {"Límite exterior del Río de la Plata"}
+    SECTOR_ANTARTICO = "Límite del Sector Antártico Argentino"
+
+    ga, gb, gc, gd = [], [], [], []
+    for _, row in lim.iterrows():
+        geom = row.geometry
+        if geom is None or geom.is_empty:
+            continue
+        obj = row.get(obj_col, "") or ""
+        nam = row.get(nam_col, "") or ""
+        if SECTOR_ANTARTICO in nam:
+            gd.append(geom)
+        elif obj in GRUPO_A:
+            ga.append(geom)
+        elif obj in GRUPO_B:
+            gb.append(geom)
+        elif obj in GRUPO_C:
+            gc.append(geom)
+
+    # --- Provincias.shp ------------------------------------------------------
+    provincias_wkb: list = []
+    if os.path.exists(_PROVINCIAS_SHP):
+        prov_df = gpd.read_file(_PROVINCIAS_SHP)
+        provincias_wkb = _simplify_wkb(list(prov_df.geometry))
+
+    # --- referencias.shp (países limítrofes) ---------------------------------
+    paises_wkb: list = []
+    if os.path.exists(_REFERENCIAS_SHP):
+        ref_df = gpd.read_file(_REFERENCIAS_SHP)
+        tipo_col = "tipo" if "tipo" in ref_df.columns else "TIPO"
+        paises_df = ref_df[ref_df[tipo_col] == "país"]
+        paises_wkb = _simplify_wkb(list(paises_df.geometry))
+
+    # --- toponimos.shp (etiquetas de texto: (Arg.), nombres de islas, etc.) ---
+    # pyogrio (backend de geopandas) NO soporta el paramétro encoding para
+    # shapefiles, por lo que leemos el archivo manualmente con stdlib.
+    toponimos: list = []
+    if os.path.exists(_TOPONIMOS_SHP):
+        toponimos = _leer_toponimos_manual(_TOPONIMOS_SHP, logger)
+
+    capas = {
+        "grupo_a": _simplify_wkb(ga),
+        "grupo_b": _simplify_wkb(gb),
+        "grupo_c": _simplify_wkb(gc),
+        "grupo_d": _simplify_wkb(gd),
+        "provincias": provincias_wkb,
+        "paises": paises_wkb,
+        "toponimos": toponimos,
+    }
+
+    with open(out_path, "wb") as f:
+        pickle.dump(capas, f, protocol=pickle.HIGHEST_PROTOCOL)
+
+    size_mb = os.path.getsize(out_path) / 1024 / 1024
+    totals = {k: len(v) for k, v in capas.items()}
+    logger.info("ign_capas.pkl ready: %s geometries, %.1f MB", totals, size_mb)
+
+
+async def _build_ign_cache(settings, logger: Logger) -> None:
+    """Async wrapper: run IGN shapefile pre-processing in a thread pool."""
+    cache_dir = settings.alert_cache_dir
+    os.makedirs(cache_dir, exist_ok=True)
+    out_path = os.path.join(cache_dir, "ign_capas.pkl")
+    if os.path.exists(out_path):
+        logger.info("ign_capas.pkl already exists — skipping rebuild.")
+        return
+    await asyncio.to_thread(_build_ign_cache_sync, cache_dir, logger)
+
+
 async def setup_scheduler(settings, logger: Logger) -> AsyncIOScheduler:
     """Configure and return an AsyncIOScheduler with the layer refresh cron job."""
     data_dir = settings.data_dir
@@ -165,6 +386,7 @@ async def setup_scheduler(settings, logger: Logger) -> AsyncIOScheduler:
     await sync_service.regenerate()
     await _ensure_alert_layers(settings, logger, processor)
     await _build_alert_cache(settings, logger)
+    await _build_ign_cache(settings, logger)
 
     db_path = os.path.join(data_dir, "history.db")
     history = SqliteHistoryRepository(db_path)
