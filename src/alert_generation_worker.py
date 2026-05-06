@@ -514,16 +514,7 @@ def generar_gif_general(text, coords, timestamp, output_dir, dept_geoms, prov_ge
         GeoAxes, fig_final.add_axes((0, 0.01, 1, 0.86), projection=proj)
     )
 
-    # Determinar hasta qué latitud (Sur) llega el polígono
-    min_lat_poly = min(lats)
-
-    # Si el polígono entra en la porción 3 (Sur de -44.3°), mostramos el país completo (1, 2 y 3)
-    if min_lat_poly < -44.3:
-        extent = [-78, -51, -56, -21]
-    else:
-        # Si está en el Norte/Centro, mostramos solo las porciones 1 y 2.
-        # Ajustamos también mínimamente las longitudes para aprovechar el ancho al hacer el zoom.
-        extent = [-75.5, -53, -46.5, -21]
+    extent = [-78, -51, -56, -21]
 
     ax_map.set_extent(extent, crs=ccrs.PlateCarree())
     ax_map.set_facecolor("#e1f1f4")  # color de agua de fondo
