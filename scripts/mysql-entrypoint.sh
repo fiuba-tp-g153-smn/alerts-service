@@ -45,4 +45,10 @@ ALTER USER '${MYSQL_READONLY_USER}'@'%' WITH MAX_USER_CONNECTIONS ${MYSQL_READON
 FLUSH PRIVILEGES;
 EOF
 
+# Unset vars consumed by the upstream docker-entrypoint.sh: when MYSQL_USER/PASSWORD
+# are set, it runs a non-idempotent `CREATE USER` after our --init-file has already
+# created the same user, which fails with ERROR 1396. MYSQL_DATABASE is similarly
+# redundant since our grants file creates it. Root password is still needed.
+unset MYSQL_DATABASE MYSQL_USER MYSQL_PASSWORD
+
 exec docker-entrypoint.sh mysqld --init-file=/tmp/grants.sql "$@"
