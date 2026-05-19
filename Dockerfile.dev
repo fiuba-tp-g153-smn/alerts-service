@@ -2,12 +2,13 @@ FROM python:3.13.12-slim-trixie
 
 WORKDIR /app
 
-# Install system dependencies for matplotlib/cartopy (needed even in dev for native extensions)
+# Install system dependencies for matplotlib/cartopy/cairosvg (needed even in dev for native extensions)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc g++ \
     libgeos-dev libproj-dev proj-data proj-bin \
     libgdal-dev gdal-bin \
     libspatialindex-dev \
+    libcairo2 \
     fonts-dejavu-core \
     && rm -rf /var/lib/apt/lists/*
 

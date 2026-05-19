@@ -5,12 +5,13 @@ FROM python:3.13.12-slim-trixie AS builder
 
 WORKDIR /app
 
-# Install system dependencies for matplotlib/cartopy
+# Install system dependencies for matplotlib/cartopy/cairosvg
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc g++ \
     libgeos-dev libproj-dev proj-data proj-bin \
     libgdal-dev gdal-bin \
     libspatialindex-dev \
+    libcairo2 \
     fonts-dejavu-core \
     && rm -rf /var/lib/apt/lists/*
 
@@ -30,11 +31,12 @@ FROM python:3.13.12-slim-trixie AS runner
 
 WORKDIR /app
 
-# Install runtime dependencies for matplotlib/cartopy
+# Install runtime dependencies for matplotlib/cartopy/cairosvg
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libgeos-c1t64 libproj25 \
     libgdal36 \
     libspatialindex-c8 \
+    libcairo2 \
     fonts-dejavu-core \
     && rm -rf /var/lib/apt/lists/*
 
