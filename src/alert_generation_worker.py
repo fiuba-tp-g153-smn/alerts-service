@@ -553,29 +553,19 @@ def generar_gif_area(  # pylint: disable=too-many-locals
             zorder=8,
         )
 
-    # Polygon (hatch pattern + border)
+    # Polygon (sombreado sólido + borde) — estilo igual al gral, alpha bajo
+    # para que los nombres de ciudades afectadas se lean por encima.
     xy = list(zip(lons, lats))
     ax.add_patch(
         MplPolygon(
             xy,
             closed=True,
-            facecolor="none",
-            edgecolor="#CC0000",
-            linewidth=0,
-            hatch="//",
-            transform=ccrs.PlateCarree(),
-            zorder=9,
-        )
-    )
-    ax.add_patch(
-        MplPolygon(
-            xy,
-            closed=True,
-            facecolor="none",
+            facecolor="#FF4444",
+            alpha=0.40,
             edgecolor="#CC0000",
             linewidth=2.5,
             transform=ccrs.PlateCarree(),
-            zorder=10,
+            zorder=9,
         )
     )
 
