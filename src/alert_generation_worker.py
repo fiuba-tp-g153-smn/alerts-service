@@ -702,7 +702,7 @@ def generar_gif_general(text, coords, timestamp, output_dir, dept_geoms, prov_ge
 
     # Cuarterón inset — bottom-right over water per template
     # Sobre el océano (parte celeste) en el borde sur-este, no pegado al margen derecho.
-    _agregar_cuarteron(fig_final, anchor="br", margin_x=0.18, margin_y=0.015)
+    _agregar_cuarteron(fig_final, anchor="br", margin_x=0.15, margin_y=0.015)
 
     _panel_aviso(fig_final, text, modo="gral")
 
