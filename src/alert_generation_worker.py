@@ -378,7 +378,7 @@ def _agregar_capas_ign(ax: GeoAxes, modo: str = "area") -> None:
         ax.add_geometries(
             _IGN["paises"],
             crs=pc,
-            facecolor="white",
+            facecolor="#bebebe",
             edgecolor="#888888",
             linewidth=lw_paises,
             zorder=1,
@@ -395,14 +395,15 @@ def _agregar_capas_ign(ax: GeoAxes, modo: str = "area") -> None:
         )
 
     # Grupo B: Límite Interprovincial + Línea de costa
-    # Guía SMN: #656565, 1 px, línea simple continua
+    # Guía SMN (pedido Sebas): #656565, 1.5 px continua — más grueso que el
+    # interdepartamental para distinguirlo en provincias chicas (Jujuy, Tucumán)
     if _IGN["grupo_b"]:
         ax.add_geometries(
             _IGN["grupo_b"],
             crs=pc,
             facecolor="none",
             edgecolor="#656565",
-            linewidth=1.0,
+            linewidth=1.5,
             zorder=3,
         )
 
