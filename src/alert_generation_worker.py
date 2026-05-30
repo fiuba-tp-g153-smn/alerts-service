@@ -29,6 +29,7 @@ import json
 import os
 import pickle
 import sys
+import unicodedata
 from typing import Any, cast
 
 import cartopy.crs as ccrs
@@ -73,6 +74,112 @@ HEADER_ALPHA = 0.9               # 10% transparency
 
 _IGN: dict | None = None  # loaded lazily on first call inside main()
 _CUARTERON_PNG: np.ndarray | None = None  # rasterised once per process
+
+# ---------------------------------------------------------------------------
+# Cabeceras AMBA (pedido SMN) — dentro del bbox AMBA se muestran SOLO estos
+# partidos, etiquetados con su cabecera; el resto del conurbano se oculta para
+# no saturar. Fuera del bbox se mantiene el nombre del departamento.
+# ---------------------------------------------------------------------------
+# bbox: CABA + Gran Buenos Aires (conurbano), no toda la provincia.
+AMBA_BBOX = (-59.20, -57.80, -35.25, -34.05)  # (lon_o, lon_e, lat_s, lat_n)
+
+# Clave = nombre de partido normalizado (sin acentos, minúsculas); valor = cabecera.
+_AMBA_PARES = {
+    "Almirante Brown": "Adrogué",
+    "Avellaneda": "Avellaneda",
+    "Berazategui": "Berazategui",
+    "Berisso": "Berisso",
+    "Brandsen": "Brandsen",
+    "Campana": "Campana",
+    "Cañuelas": "Cañuelas",
+    "Ensenada": "Ensenada",
+    "Escobar": "Belén de Escobar",
+    "Exaltación de la Cruz": "Capilla del Señor",
+    "Ezeiza": "Ezeiza",
+    "General Las Heras": "General Las Heras",
+    "General Rodríguez": "General Rodríguez",
+    "Hurlingham": "Hurlingham",
+    "La Matanza": "San Justo",
+    "La Plata": "La Plata",
+    "Lomas de Zamora": "Lomas de Zamora",
+    "Luján": "Luján",
+    "Marcos Paz": "Marcos Paz",
+    "Merlo": "Merlo",
+    "Quilmes": "Quilmes",
+    "Pilar": "Pilar",
+    "Presidente Perón": "Guernica",
+    "San Fernando": "San Fernando",
+    "San Isidro": "San Isidro",
+    "San Miguel": "San Miguel",
+    "San Vicente": "San Vicente",
+    "Tigre": "Tigre",
+    "Vicente López": "Olivos",
+    "Zárate": "Zárate",
+}
+
+
+def _norm(s: str) -> str:
+    """Normalise a name for matching: strip accents, lowercase, collapse spaces."""
+    nfkd = unicodedata.normalize("NFKD", s)
+    sin_acentos = "".join(c for c in nfkd if not unicodedata.combining(c))
+    return " ".join(sin_acentos.lower().split())
+
+
+AMBA_CABECERAS = {_norm(k): v for k, v in _AMBA_PARES.items()}
+
+# ---------------------------------------------------------------------------
+# Cabeceras del resto del país (pedido SMN) — fuera del bbox AMBA se muestra la
+# cabecera en lugar del nombre del departamento. Clave = (provincia, depto)
+# porque "Capital" se repite en varias provincias con cabeceras distintas.
+# Departamentos sin entrada: se mantiene el nombre del departamento (incremental).
+# ---------------------------------------------------------------------------
+_CABECERAS_NACIONAL_PARES = {
+    ("Jujuy", "Yavi"): "La Quiaca",
+    ("Jujuy", "Dr Manuel Belgrano"): "San Salvador de Jujuy",
+    ("Formosa", "Formosa"): "Formosa",
+    ("Formosa", "Patiño"): "Comandante Fontana",
+    ("Salta", "Capital"): "Salta",
+    ("Salta", "General José de San Martín"): "Tartagal",
+    ("Salta", "San Carlos"): "San Carlos",
+    ("Misiones", "Capital"): "Posadas",
+    ("Misiones", "Caniguás"): "Campo Grande",
+    ("Misiones", "Cainguás"): "Campo Grande",  # grafía alternativa en DB
+    ("Misiones", "Iguazú"): "Puerto Esperanza",
+    ("Chaco", "San Fernando"): "Resistencia",
+    ("Chaco", "Comandante Fernández"): "Presidencia Roque Saenz Peña",
+    ("Chaco", "General Güemes"): "Juan José Castelli",
+    ("Santiago del Estero", "Capital"): "Santiago del Estero",
+    ("Santiago del Estero", "Copo"): "Monte Quemado",
+    ("Santiago del Estero", "Figueroa"): "La Cañada",
+    ("Santiago del Estero", "General Taboada"): "Añatuya",
+    ("Santiago del Estero", "Choya"): "Frías",
+}
+
+CABECERAS_NACIONAL = {
+    (_norm(prov), _norm(dep)): cab
+    for (prov, dep), cab in _CABECERAS_NACIONAL_PARES.items()
+}
+
+
+def _etiqueta_departamento(
+    nom_depto: str, provincia: str, lon: float, lat: float
+) -> str | None:
+    """Texto a mostrar para un departamento, o None si debe ocultarse.
+
+    - Comunas CABA ("Comuna N"): ocultas.
+    - Dentro del bbox AMBA: solo los partidos del listado SMN (con su cabecera);
+      el resto se oculta para no saturar.
+    - Fuera del bbox AMBA: se usa la cabecera del listado nacional si existe;
+      si no, se mantiene el nombre del departamento.
+    """
+    if nom_depto.lower().startswith("comuna ") and nom_depto[7:].strip().isdigit():
+        return None
+
+    lon_o, lon_e, lat_s, lat_n = AMBA_BBOX
+    en_amba = lon_o <= lon <= lon_e and lat_s <= lat <= lat_n
+    if en_amba:
+        return AMBA_CABECERAS.get(_norm(nom_depto))  # None si no está en el listado
+    return CABECERAS_NACIONAL.get((_norm(provincia), _norm(nom_depto)), nom_depto)
 
 
 # ---------------------------------------------------------------------------
@@ -598,14 +705,14 @@ def generar_gif_area(  # pylint: disable=too-many-locals
             zorder=z_pt,
         )
 
-        nom_depto = department["nom_departamento"]
-        is_comuna_caba = nom_depto.lower().startswith("comuna ") and nom_depto[7:].strip().isdigit()
-
-        if not is_comuna_caba:
+        etiqueta = _etiqueta_departamento(
+            department["nom_departamento"], department.get("provincia", ""), lon, lat
+        )
+        if etiqueta is not None:
             ax.text(
                 lon + 0.04,
                 lat + 0.03,
-                nom_depto,
+                etiqueta,
                 fontsize=7.5,
                 color=color_txt,
                 fontweight="bold",
