@@ -52,9 +52,16 @@ EOF
 # (dev/test) we simulate that external database as a separate schema on this same
 # server: create the database, a dedicated read-only user, and grant the app user
 # (${MYSQL_USER}) DDL on it so Alembic migration 005 can create the `taviso` table.
+# Migration 006 also creates a stored procedure + trigger on the primary database to
+# simulate the external sync service, so the app user additionally needs TRIGGER and
+# routine privileges there (test only — production never receives these).
 case "${MANAGE_TAVISO_SCHEMA,,}" in
   1 | true | yes)
     cat >> /tmp/grants.sql <<EOF
+
+-- Allow the non-SUPER app user to create the trigger/procedure (migration 006)
+-- while binary logging is enabled. Runtime global, re-applied on every startup.
+SET GLOBAL log_bin_trust_function_creators = 1;
 
 CREATE DATABASE IF NOT EXISTS \`${MYSQL_TAVISO_DATABASE}\` CHARACTER SET latin1;
 
@@ -64,6 +71,10 @@ GRANT SELECT ON \`${MYSQL_TAVISO_DATABASE}\`.* TO '${MYSQL_TAVISO_USER}'@'%';
 
 -- App user needs DDL on the taviso schema so Alembic can create the table there
 GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, ALTER, DROP, INDEX, REFERENCES ON \`${MYSQL_TAVISO_DATABASE}\`.* TO '${MYSQL_USER}'@'%';
+
+-- App user needs TRIGGER + routine privileges on the primary database so Alembic
+-- migration 006 can create the simulated sync stored procedure and trigger.
+GRANT TRIGGER, CREATE ROUTINE, ALTER ROUTINE, EXECUTE ON \`${MYSQL_DATABASE}\`.* TO '${MYSQL_USER}'@'%';
 
 FLUSH PRIVILEGES;
 EOF
