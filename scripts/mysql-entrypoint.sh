@@ -45,6 +45,31 @@ ALTER USER '${MYSQL_READONLY_USER}'@'%' WITH MAX_USER_CONNECTIONS ${MYSQL_READON
 FLUSH PRIVILEGES;
 EOF
 
+# External taviso database provisioning (dev/test only)
+# =====================================================
+# In production the external `taviso` table lives in the client's database and is
+# accessed read-only — we never provision it. When MANAGE_TAVISO_SCHEMA is enabled
+# (dev/test) we simulate that external database as a separate schema on this same
+# server: create the database, a dedicated read-only user, and grant the app user
+# (${MYSQL_USER}) DDL on it so Alembic migration 005 can create the `taviso` table.
+case "${MANAGE_TAVISO_SCHEMA,,}" in
+  1 | true | yes)
+    cat >> /tmp/grants.sql <<EOF
+
+CREATE DATABASE IF NOT EXISTS \`${MYSQL_TAVISO_DATABASE}\` CHARACTER SET latin1;
+
+-- Dedicated external read-only user for the taviso database
+CREATE USER IF NOT EXISTS '${MYSQL_TAVISO_USER}'@'%' IDENTIFIED BY '${MYSQL_TAVISO_PASSWORD}';
+GRANT SELECT ON \`${MYSQL_TAVISO_DATABASE}\`.* TO '${MYSQL_TAVISO_USER}'@'%';
+
+-- App user needs DDL on the taviso schema so Alembic can create the table there
+GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, ALTER, DROP, INDEX, REFERENCES ON \`${MYSQL_TAVISO_DATABASE}\`.* TO '${MYSQL_USER}'@'%';
+
+FLUSH PRIVILEGES;
+EOF
+    ;;
+esac
+
 # Unset vars consumed by the upstream docker-entrypoint.sh: when MYSQL_USER/PASSWORD
 # are set, it runs a non-idempotent `CREATE USER` after our --init-file has already
 # created the same user, which fails with ERROR 1396. MYSQL_DATABASE is similarly

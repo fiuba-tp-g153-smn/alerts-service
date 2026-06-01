@@ -8,9 +8,11 @@ from fastapi import Depends
 
 from adapters.geo_layer_repository import FileSystemGeoLayerRepository
 from adapters.mysql_alerts import MySQLAlertsRepository
+from adapters.mysql_taviso import MySQLTavisoReadRepository
 from adapters.sqlite_history import SqliteHistoryRepository
 from initializers import init_logger
 from ports.mysql_repository import IMySQLRepository
+from ports.taviso_repository import ITavisoReadRepository
 from services.alert_generation_service import AlertGenerationService
 from services.geo_intersection_service import GeoIntersectionService
 from settings import Settings
@@ -61,6 +63,19 @@ def get_mysql_repo() -> IMySQLRepository:
         database=settings.mysql_database,
         user=settings.mysql_user,
         password=settings.mysql_password,
+    )
+
+
+@lru_cache
+def get_taviso_repo() -> ITavisoReadRepository:
+    """Return a singleton read-only repository for the external taviso database."""
+    settings = get_settings()
+    return MySQLTavisoReadRepository(
+        host=settings.mysql_taviso_host,
+        port=settings.mysql_taviso_port,
+        database=settings.mysql_taviso_database,
+        user=settings.mysql_taviso_user,
+        password=settings.mysql_taviso_password,
     )
 
 

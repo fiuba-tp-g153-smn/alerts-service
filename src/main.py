@@ -9,7 +9,12 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from container import get_geo_repo, get_history_repo, get_mysql_repo
+from container import (
+    get_geo_repo,
+    get_history_repo,
+    get_mysql_repo,
+    get_taviso_repo,
+)
 from controller import alerts, general, intersections
 from dependencies import logger, settings
 from scheduler import setup_scheduler
@@ -52,6 +57,10 @@ async def lifespan(_app: FastAPI):
 
     get_history_repo().close()
     get_mysql_repo().close()
+    # Only close the taviso pool if it was ever instantiated, to avoid opening
+    # a connection to the external database just to close it.
+    if get_taviso_repo.cache_info().currsize:
+        get_taviso_repo().close()
     logger.info("Database connections closed.")
 
 
