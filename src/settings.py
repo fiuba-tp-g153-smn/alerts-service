@@ -44,12 +44,19 @@ class Settings:  # pylint: disable=too-many-instance-attributes,too-few-public-m
         "&typeName=ign:provincia&outputFormat=application/json"
     )
 
-    # MySQL Database
+    # MySQL Database (primary)
     mysql_host: str = ""
     mysql_port: int = 3306
     mysql_database: str = ""
     mysql_user: str = ""
     mysql_password: str = ""
+
+    # MySQL Database (external taviso, read-only)
+    mysql_taviso_host: str = ""
+    mysql_taviso_port: int = 3306
+    mysql_taviso_database: str = ""
+    mysql_taviso_user: str = ""
+    mysql_taviso_password: str = ""
 
     # Alert Generation
     output_dir: str = ""
@@ -109,6 +116,18 @@ class Settings:  # pylint: disable=too-many-instance-attributes,too-few-public-m
         self.mysql_user = os.getenv("MYSQL_USER", self.mysql_user)
         self.mysql_password = os.getenv("MYSQL_PASSWORD", self.mysql_password)
 
+        self.mysql_taviso_host = os.getenv("MYSQL_TAVISO_HOST", self.mysql_taviso_host)
+        self.mysql_taviso_port = int(
+            os.getenv("MYSQL_TAVISO_PORT", str(self.mysql_taviso_port))
+        )
+        self.mysql_taviso_database = os.getenv(
+            "MYSQL_TAVISO_DATABASE", self.mysql_taviso_database
+        )
+        self.mysql_taviso_user = os.getenv("MYSQL_TAVISO_USER", self.mysql_taviso_user)
+        self.mysql_taviso_password = os.getenv(
+            "MYSQL_TAVISO_PASSWORD", self.mysql_taviso_password
+        )
+
         self.output_dir = os.getenv("OUTPUT_DIR", self.output_dir)
         self.alert_cache_dir = os.getenv("ALERT_CACHE_DIR", self.alert_cache_dir)
 
@@ -129,6 +148,8 @@ class Settings:  # pylint: disable=too-many-instance-attributes,too-few-public-m
 
         logger.info("ALERT_SIMPLIFICATION_LEVEL: %s", self.alert_simplification_level)
         logger.info("POLYGON_DB_MAX_CHARS: %s", self.polygon_db_max_chars)
+        logger.info("MYSQL_TAVISO_HOST: %s", self.mysql_taviso_host)
+        logger.info("MYSQL_TAVISO_DATABASE: %s", self.mysql_taviso_database)
         logger.info("S3_ENDPOINT: %s", self.s3_endpoint)
         logger.info("S3_BUCKET_NAME: %s", self.s3_bucket_name)
         logger.info("S3_SECURE: %s", self.s3_secure)
