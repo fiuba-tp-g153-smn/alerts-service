@@ -38,7 +38,7 @@ async def generate_alert(
     - `gif_area_url`: Zoomed map of the affected area with labeled municipalities
     - `gif_gral_url`: Full Argentina map with the alert polygon highlighted
 
-    Also inserts the alert record into the `taviso` table in MySQL.
+    Also inserts the alert record into the `taviso_temporal` table in MySQL.
     """
     start_time = time.perf_counter()
     try:

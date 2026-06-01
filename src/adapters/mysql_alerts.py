@@ -84,7 +84,7 @@ class MySQLAlertsRepository(IMySQLRepository):
         try:
             cursor = conn.cursor()
             cursor.execute(
-                "INSERT INTO taviso (fenomeno, area, poligono) VALUES (%s, %s, %s)",
+                "INSERT INTO taviso_temporal (fenomeno, area, poligono) VALUES (%s, %s, %s)",
                 (phenomenon, area, polygon),
             )
             conn.commit()
