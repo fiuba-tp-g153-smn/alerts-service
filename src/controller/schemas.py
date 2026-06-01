@@ -1,9 +1,9 @@
 """Pydantic input schemas for geo intersection endpoints."""
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, field_serializer, field_validator, model_validator
 
 
 class GeoJSONInput(BaseModel):
@@ -46,7 +46,11 @@ class Phenomenon(BaseModel):
 
 
 class AlertSummary(BaseModel):
-    """Summary of an active alert from the external taviso table."""
+    """Summary of an active alert from the external taviso table.
+
+    The taviso datetimes are stored in UTC but are timezone-naive in the DB, so
+    they are interpreted as UTC and serialized with a trailing 'Z'.
+    """
 
     alert_id: int
     phenomenon: str
@@ -54,3 +58,18 @@ class AlertSummary(BaseModel):
     polygon: str
     start_datetime: datetime
     end_datetime: datetime
+
+    @field_validator("start_datetime", "end_datetime", mode="before")
+    @classmethod
+    def _assume_utc(cls, value: Any) -> Any:
+        """Interpret naive datetimes coming from the DB as UTC."""
+        if isinstance(value, datetime) and value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value
+
+    @field_serializer("start_datetime", "end_datetime")
+    def _serialize_utc_z(self, value: datetime) -> str:
+        """Serialize as ISO-8601 in UTC with a trailing 'Z'."""
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")

@@ -69,8 +69,8 @@ def test_list_active_alerts_field_names(client_with_alerts):
             "phenomenon": "TORMENTAS",
             "area": "Area X",
             "polygon": "-58.5 -34.6",
-            "start_datetime": "2026-06-01T10:00:00",
-            "end_datetime": "2026-06-01T13:00:00",
+            "start_datetime": "2026-06-01T10:00:00Z",
+            "end_datetime": "2026-06-01T13:00:00Z",
         }
     ]
     assert resp.headers["ETag"] == '"10"'
