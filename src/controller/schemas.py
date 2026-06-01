@@ -1,5 +1,6 @@
 """Pydantic input schemas for geo intersection endpoints."""
 
+from datetime import datetime
 from typing import Any, Dict, Optional
 
 from pydantic import BaseModel, model_validator
@@ -42,3 +43,14 @@ class Phenomenon(BaseModel):
 
     code: int
     description: Optional[str]
+
+
+class AlertSummary(BaseModel):
+    """Summary of an active alert from the external taviso table."""
+
+    alert_id: int
+    phenomenon: str
+    area: str
+    polygon: str
+    start_datetime: datetime
+    end_datetime: datetime

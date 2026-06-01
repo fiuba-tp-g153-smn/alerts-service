@@ -1,15 +1,20 @@
 """Abstract interface for read-only access to the external taviso database."""
 
 from abc import ABC, abstractmethod
-from typing import List
+from typing import List, Optional
 
 
 class ITavisoReadRepository(ABC):
     """Read-only port for the external MySQL `taviso` table."""
 
     @abstractmethod
-    def fetch_alerts(self, limit: int = 100) -> List[dict]:
-        """Return the most recent alerts from the `taviso` table."""
+    def get_active_alerts(self, since_id: Optional[int] = None) -> List[dict]:
+        """Return active alerts (started and not expired), optionally only those
+        with IdAlerta greater than since_id, ordered by IdAlerta."""
+
+    @abstractmethod
+    def get_max_active_alert_id(self) -> Optional[int]:
+        """Return the highest IdAlerta among active alerts, or None if none."""
 
     @abstractmethod
     def close(self) -> None:

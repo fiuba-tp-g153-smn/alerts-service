@@ -1,6 +1,6 @@
 """Read-only MySQL adapter for the external taviso database."""
 
-from typing import List
+from typing import List, Optional
 
 from mysql.connector import pooling
 
@@ -29,17 +29,43 @@ class MySQLTavisoReadRepository(ITavisoReadRepository):
             charset="latin1",
         )
 
-    def fetch_alerts(self, limit: int = 100) -> List[dict]:
-        """Return the most recent alerts from the `taviso` table."""
+    def get_active_alerts(self, since_id: Optional[int] = None) -> List[dict]:
+        """Return active alerts (started and not expired), optionally filtered to
+        those with IdAlerta greater than since_id, ordered by IdAlerta."""
         conn = self.pool.get_connection()
         cursor = None
         try:
             cursor = conn.cursor(dictionary=True)
             cursor.execute(
-                "SELECT * FROM taviso ORDER BY IdAlerta DESC LIMIT %s",
-                (limit,),
+                """
+                SELECT IdAlerta, Fenomeno, Area, Poligono, FechaHora, FechaFin
+                FROM taviso
+                WHERE FechaHora <= NOW() AND FechaFin > NOW()
+                  AND (%s IS NULL OR IdAlerta > %s)
+                ORDER BY IdAlerta
+                """,
+                (since_id, since_id),
             )
             return cursor.fetchall()
+        finally:
+            if cursor is not None:
+                cursor.close()
+            conn.close()
+
+    def get_max_active_alert_id(self) -> Optional[int]:
+        """Return the highest IdAlerta among active alerts, or None if none."""
+        conn = self.pool.get_connection()
+        cursor = None
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT MAX(IdAlerta) FROM taviso
+                WHERE FechaHora <= NOW() AND FechaFin > NOW()
+                """
+            )
+            row = cursor.fetchone()
+            return row[0] if row else None
         finally:
             if cursor is not None:
                 cursor.close()
