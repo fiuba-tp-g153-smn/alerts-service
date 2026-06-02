@@ -4,7 +4,7 @@ In production an external service reads `taviso_temporal`, enriches it with othe
 sources and writes into `taviso` (which lives on a different host). In dev/test
 that service does not exist, so we simulate it: an AFTER INSERT trigger on
 `taviso_temporal` calls a stored procedure that inserts a mirrored row into the
-external taviso table (a separate schema on the same MySQL server here).
+`taviso` table (created unqualified in the same primary database by migration 005).
 
 Cross-host triggers are impossible, so this is gated by MANAGE_TAVISO_SCHEMA and
 is a no-op in production. Depends on revision 005 having created the taviso table.
@@ -35,8 +35,6 @@ def upgrade() -> None:
     if not _manage_enabled():
         return  # Production: never create the simulation objects.
 
-    database = os.environ["MYSQL_TAVISO_DATABASE"]
-
     # Drop first so the migration is idempotent across re-runs.
     op.execute(f"DROP TRIGGER IF EXISTS {TRIGGER_NAME}")
     op.execute(f"DROP PROCEDURE IF EXISTS {PROCEDURE_NAME}")
@@ -54,7 +52,7 @@ def upgrade() -> None:
             IN p_poligono VARCHAR(1000)
         )
         BEGIN
-            INSERT INTO `{database}`.`taviso` (
+            INSERT INTO `taviso` (
                 `Numero`, `Fenomeno`, `Area`, `Poligono`, `Parcial`, `FechaHora`,
                 `gmp_general`, `gmp_ezeiza`, `gmp_anguil`, `gmp_pergamino`, `gmp_parana`,
                 `CMAX_240`, `CMAX_PERGAMINO`, `CMAX_PARANA`, `CMAX_ANGUIL`, `CMAX_SRA`, `CMAX_SMA`,

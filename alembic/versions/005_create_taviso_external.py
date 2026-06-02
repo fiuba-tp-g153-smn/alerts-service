@@ -3,10 +3,13 @@
 In production the external `taviso` table belongs to the client's database and
 is accessed read-only — we must never run DDL there. This migration is gated by
 the MANAGE_TAVISO_SCHEMA flag so it is a no-op unless explicitly enabled (dev/test),
-where it creates the table inside the separate MYSQL_TAVISO_DATABASE living on the
-same MySQL server. The exact client DDL is embedded verbatim (latin1, enums,
-zero-date defaults, AUTO_INCREMENT); sql_mode is relaxed at session level so
-MySQL 8.4 accepts the zero-date defaults.
+where it creates the table (unqualified) in the database Alembic is connected to —
+the primary app database (aviso_gempak). The app user already has DDL there, so no
+separate schema, cross-schema grant, or MYSQL_TAVISO_DATABASE lookup is needed (the
+app's read connection still uses MYSQL_TAVISO_* and stays configurable for prod). The
+exact client DDL is embedded verbatim (latin1, enums, zero-date defaults,
+AUTO_INCREMENT); sql_mode is relaxed at session level so MySQL 8.4 accepts the
+zero-date defaults.
 
 Revision ID: 005
 Revises: 004
@@ -31,12 +34,13 @@ def upgrade() -> None:
     if not _manage_enabled():
         return  # Production: never run DDL against the external taviso database.
 
-    database = os.environ["MYSQL_TAVISO_DATABASE"]
     # Relax sql_mode for this session so '0000-00-00 00:00:00' defaults are accepted.
     op.execute("SET SESSION sql_mode=''")
+    # Created (unqualified) in the database Alembic is connected to — the primary
+    # app database (aviso_gempak) in dev/test, where the app user already has DDL.
     op.execute(
-        f"""
-        CREATE TABLE IF NOT EXISTS `{database}`.`taviso` (
+        """
+        CREATE TABLE IF NOT EXISTS `taviso` (
           `IdAlerta` int(10) unsigned NOT NULL AUTO_INCREMENT,
           `Numero` smallint(6) NOT NULL,
           `Fenomeno` varchar(150) NOT NULL,
@@ -72,5 +76,4 @@ def downgrade() -> None:
     if not _manage_enabled():
         return
 
-    database = os.environ["MYSQL_TAVISO_DATABASE"]
-    op.execute(f"DROP TABLE IF EXISTS `{database}`.`taviso`")
+    op.execute("DROP TABLE IF EXISTS `taviso`")
