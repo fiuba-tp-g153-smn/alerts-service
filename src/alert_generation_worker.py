@@ -98,10 +98,8 @@ _AMBA_PARES = {
     "Ezeiza": "Ezeiza",
     "General Las Heras": "General Las Heras",
     "General Rodríguez": "General Rodríguez",
-    "Hurlingham": "Hurlingham",
     "La Matanza": "San Justo",
     "La Plata": "La Plata",
-    "Lomas de Zamora": "Lomas de Zamora",
     "Luján": "Luján",
     "Marcos Paz": "Marcos Paz",
     "Merlo": "Merlo",
@@ -110,7 +108,6 @@ _AMBA_PARES = {
     "Presidente Perón": "Guernica",
     "San Fernando": "San Fernando",
     "San Isidro": "San Isidro",
-    "San Miguel": "San Miguel",
     "San Vicente": "San Vicente",
     "Tigre": "Tigre",
     "Vicente López": "Olivos",
@@ -679,15 +676,25 @@ def generar_gif_area(  # pylint: disable=too-many-locals
 
     # Departments - all visible in bbox, highlighted if affected
     affected_ids = {(d["id_provincia"], d["id_localidad"]) for d in departments}
+    caba_visible = False
+    caba_affected = False
     for department in all_departments or []:
         lon, lat = float(department["longitud"]), float(department["latitud"])
         if not (lon_o <= lon <= lon_e and lat_s <= lat <= lat_n):
             continue
 
+        nom_depto = department["nom_departamento"]
         is_affected = (
             department["id_provincia"],
             department["id_localidad"],
         ) in affected_ids
+
+        # CABA communes: skip individual dots, consolidate into single point after loop
+        if nom_depto.lower().startswith("comuna ") and nom_depto[7:].strip().isdigit():
+            caba_visible = True
+            if is_affected:
+                caba_affected = True
+            continue
 
         color_pt = "#111111" if is_affected else "#555555"
         color_txt = "#111111"
@@ -706,9 +713,10 @@ def generar_gif_area(  # pylint: disable=too-many-locals
         )
 
         etiqueta = _etiqueta_departamento(
-            department["nom_departamento"], department.get("provincia", ""), lon, lat
+            nom_depto, department.get("provincia", ""), lon, lat
         )
         if etiqueta is not None:
+            etiqueta = etiqueta.replace("General ", "Gral. ")
             ax.text(
                 lon + 0.04,
                 lat + 0.03,
@@ -721,6 +729,19 @@ def generar_gif_area(  # pylint: disable=too-many-locals
                 clip_on=True,
                 path_effects=[pe.withStroke(linewidth=2, foreground="white")],
             )
+
+    if caba_visible:
+        caba_lon, caba_lat = -58.3816, -34.6037  # Obelisco
+        c_color = "#111111" if caba_affected else "#555555"
+        c_marker = "o" if caba_affected else "."
+        c_size = 5 if caba_affected else 3.5
+        c_z_pt, c_z_txt = (13, 14) if caba_affected else (11, 12)
+        ax.plot(caba_lon, caba_lat, c_marker, color=c_color, markersize=c_size,
+                transform=ccrs.PlateCarree(), zorder=c_z_pt)
+        ax.text(caba_lon + 0.04, caba_lat + 0.03, "CABA", fontsize=7.5,
+                color="#111111", fontweight="bold", transform=ccrs.PlateCarree(),
+                zorder=c_z_txt, clip_on=True,
+                path_effects=[pe.withStroke(linewidth=2, foreground="white")])
 
     _agregar_marca_de_agua(fig)
 
