@@ -19,7 +19,7 @@ set -e
 #     - DML + DDL on the app database.
 #     - TRIGGER + routine privileges so Alembic migration 006 can create the
 #       dev/test taviso sync stored procedure and trigger. In real production the
-#       migration is gated off (MANAGE_TAVISO_SCHEMA unset) so these go unused.
+#       migration is gated off (MANAGE_DB_SCHEMAS unset) so these go unused.
 #
 #   ${MYSQL_READONLY_USER} (e.g. avisos)
 #     - External readonly user (SELECT only, rate-limited).

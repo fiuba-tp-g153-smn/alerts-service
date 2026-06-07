@@ -1,22 +1,20 @@
 """Create the external taviso table (dev/test only)
 
 In production the external `taviso` table belongs to the client's database and
-is accessed read-only — we must never run DDL there. This migration is gated by
-the MANAGE_TAVISO_SCHEMA flag so it is a no-op unless explicitly enabled (dev/test),
-where it creates the table (unqualified) in the database Alembic is connected to —
-the primary app database (aviso_gempak). The app user already has DDL there, so no
-separate schema, cross-schema grant, or MYSQL_TAVISO_DATABASE lookup is needed (the
-app's read connection still uses MYSQL_TAVISO_* and stays configurable for prod). The
-exact client DDL is embedded verbatim (latin1, enums, zero-date defaults,
-AUTO_INCREMENT); sql_mode is relaxed at session level so MySQL 8.4 accepts the
-zero-date defaults.
+is accessed read-only — we must never run DDL there. All migrations are gated by
+the MANAGE_DB_SCHEMAS flag (centralized in alembic/env.py), so this is a no-op
+unless schema management is explicitly enabled (dev/test). There it creates the
+table (unqualified) in the database Alembic is connected to — the primary app
+database (aviso_gempak). The app user already has DDL there, so no separate schema,
+cross-schema grant, or MYSQL_TAVISO_DATABASE lookup is needed (the app's read
+connection still uses MYSQL_TAVISO_* and stays configurable for prod). The exact
+client DDL is embedded verbatim (latin1, enums, zero-date defaults, AUTO_INCREMENT);
+sql_mode is relaxed at session level so MySQL 8.4 accepts the zero-date defaults.
 
 Revision ID: 005
 Revises: 004
 Create Date: 2026-06-01
 """
-
-import os
 
 from alembic import op
 
@@ -26,14 +24,7 @@ branch_labels = None
 depends_on = None
 
 
-def _manage_enabled() -> bool:
-    return os.getenv("MANAGE_TAVISO_SCHEMA", "").lower() in ("1", "true", "yes")
-
-
 def upgrade() -> None:
-    if not _manage_enabled():
-        return  # Production: never run DDL against the external taviso database.
-
     # Relax sql_mode for this session so '0000-00-00 00:00:00' defaults are accepted.
     op.execute("SET SESSION sql_mode=''")
     # Created (unqualified) in the database Alembic is connected to — the primary
@@ -73,7 +64,4 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    if not _manage_enabled():
-        return
-
     op.execute("DROP TABLE IF EXISTS `taviso`")
