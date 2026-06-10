@@ -131,25 +131,113 @@ AMBA_CABECERAS = {_norm(k): v for k, v in _AMBA_PARES.items()}
 # Departamentos sin entrada: se mantiene el nombre del departamento (incremental).
 # ---------------------------------------------------------------------------
 _CABECERAS_NACIONAL_PARES = {
+    # --- Jujuy ---
     ("Jujuy", "Yavi"): "La Quiaca",
     ("Jujuy", "Dr Manuel Belgrano"): "San Salvador de Jujuy",
+    # --- Formosa ---
     ("Formosa", "Formosa"): "Formosa",
     ("Formosa", "Patiño"): "Comandante Fontana",
+    # --- Salta ---
     ("Salta", "Capital"): "Salta",
     ("Salta", "General José de San Martín"): "Tartagal",
     ("Salta", "San Carlos"): "San Carlos",
+    # --- Misiones ---
     ("Misiones", "Capital"): "Posadas",
     ("Misiones", "Caniguás"): "Campo Grande",
     ("Misiones", "Cainguás"): "Campo Grande",  # grafía alternativa en DB
     ("Misiones", "Iguazú"): "Puerto Esperanza",
+    # --- Chaco ---
     ("Chaco", "San Fernando"): "Resistencia",
     ("Chaco", "Comandante Fernández"): "Presidencia Roque Saenz Peña",
     ("Chaco", "General Güemes"): "Juan José Castelli",
+    # --- Santiago del Estero ---
     ("Santiago del Estero", "Capital"): "Santiago del Estero",
     ("Santiago del Estero", "Copo"): "Monte Quemado",
     ("Santiago del Estero", "Figueroa"): "La Cañada",
     ("Santiago del Estero", "General Taboada"): "Añatuya",
     ("Santiago del Estero", "Choya"): "Frías",
+    # --- Corrientes ---
+    ("Corrientes", "Capital"): "Corrientes",
+    ("Corrientes", "Goya"): "Goya",
+    ("Corrientes", "Paso de los Libres"): "Paso de los Libres",
+    # --- Tucumán ---
+    ("Tucumán", "Capital"): "San Miguel de Tucumán",
+    ("Tucumán", "La Cocha"): "La Cocha",
+    # --- Catamarca ---
+    ("Catamarca", "Capital"): "San Fernando del Valle de Catamarca",
+    ("Catamarca", "Tinogasta"): "Tinogasta",
+    # --- La Rioja ---
+    ("La Rioja", "Capital"): "La Rioja",
+    ("La Rioja", "Chilecito"): "Chilecito",
+    ("La Rioja", "Chamical"): "Chamical",
+    # --- Santa Fe ---
+    ("Santa Fe", "Rosario"): "Rosario",
+    ("Santa Fe", "La Capital"): "Santa Fe de la Veracruz",
+    ("Santa Fe", "Castellanos"): "Rafaela",
+    ("Santa Fe", "General Obligado"): "Reconquista",
+    # --- San Juan ---
+    ("San Juan", "Capital"): "Ciudad de San Juan",
+    ("San Juan", "Jáchal"): "San José de Jáchal",
+    # --- Córdoba ---
+    ("Córdoba", "Capital"): "Córdoba",
+    ("Córdoba", "Cruz del Eje"): "Cruz del Eje",
+    ("Córdoba", "General San Martín"): "Villa María",
+    ("Córdoba", "Río Cuarto"): "Río Cuarto",
+    ("Córdoba", "Presidente Roque Saenz Peña"): "Laboulaye",
+    # --- Entre Ríos ---
+    ("Entre Ríos", "Concordia"): "Concordia",
+    ("Entre Ríos", "Gualeguaychú"): "Gualeguaychú",
+    ("Entre Ríos", "Tala"): "Rosario del Tala",
+    ("Entre Ríos", "Paraná"): "Paraná",
+    # --- San Luis ---
+    ("San Luis", "Juan Martín de Pueyrredon"): "Ciudad de San Luis",
+    ("San Luis", "General Pedernera"): "Villa Mercedes",
+    ("San Luis", "Junín"): "Merlo",
+    ("San Luis", "Gobernador Dupuy"): "Buena Esperanza",
+    # --- Mendoza ---
+    ("Mendoza", "Capital"): "Mendoza",
+    ("Mendoza", "San Rafael"): "San Rafael",
+    ("Mendoza", "Malargüe"): "Malargüe",
+    ("Mendoza", "San Carlos"): "San Carlos",
+    # --- Buenos Aires (fuera del bbox AMBA) ---
+    ("Buenos Aires", "Pergamino"): "Pergamino",
+    ("Buenos Aires", "Junín"): "Junín",
+    ("Buenos Aires", "General Villegas"): "General Villegas",
+    ("Buenos Aires", "Pehuajó"): "Pehuajó",
+    ("Buenos Aires", "Bolívar"): "San Carlos de Bolívar",
+    ("Buenos Aires", "Azul"): "Azul",
+    ("Buenos Aires", "Tandil"): "Tandil",
+    ("Buenos Aires", "Lobos"): "Lobos",
+    ("Buenos Aires", "Las Flores"): "Las Flores",
+    ("Buenos Aires", "Partido de La Costa"): "Mar del Tuyú",
+    ("Buenos Aires", "Villa Gesell"): "Villa Gesell",
+    ("Buenos Aires", "General Pueyrredon"): "Mar del Plata",
+    ("Buenos Aires", "Necochea"): "Necochea",
+    ("Buenos Aires", "Bahía Blanca"): "Bahía Blanca",
+    ("Buenos Aires", "Saavedra"): "Pigüe",
+    ("Buenos Aires", "Coronel Pringles"): "Coronel Pringles",
+    # --- La Pampa ---
+    ("La Pampa", "Capital"): "Santa Rosa",
+    ("La Pampa", "Maracó"): "General Pico",
+    ("La Pampa", "Loventué"): "Victorica",
+    ("La Pampa", "Ultracán"): "General Acha",
+    ("La Pampa", "Puelén"): "25 de Mayo",
+    # --- Neuquén ---
+    ("Neuquén", "Chos Malal"): "Chos Malal",
+    ("Neuquén", "Confluencia"): "Ciudad de Neuquén",
+    ("Neuquén", "Zapala"): "Zapala",
+    ("Neuquén", "Los Lagos"): "Villa La Angostura",
+    # --- Río Negro ---
+    ("Río Negro", "Adolfo Alsina"): "Viedma",
+    ("Río Negro", "Avellaneda"): "Choele Choel",
+    ("Río Negro", "San Antonio Oeste"): "San Antonio Oeste",
+    ("Río Negro", "25 de Mayo"): "Maquinchao",
+    # --- Chubut ---
+    ("Chubut", "Escalante"): "Comodoro Rivadavia",
+    ("Chubut", "Rawson"): "Trelew",
+    ("Chubut", "Biedma"): "Puerto Madryn",
+    ("Chubut", "Futaleufú"): "Esquel",
+    ("Chubut", "Paso de Indios"): "Paso de Indios",
 }
 
 CABECERAS_NACIONAL = {
