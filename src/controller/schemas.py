@@ -3,7 +3,13 @@
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
-from pydantic import BaseModel, field_serializer, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    Field,
+    field_serializer,
+    field_validator,
+    model_validator,
+)
 
 
 class GeoJSONInput(BaseModel):
@@ -36,6 +42,15 @@ class GeoJSONInput(BaseModel):
         if geojson_type == "feature":
             return data.get("geometry") or {}
         return data
+
+
+class AlertCreateRequest(BaseModel):
+    """Request body for generating a weather alert."""
+
+    phenomenon_code: int = Field(
+        ..., ge=1, le=92, description="Weather phenomenon code (1-92)"
+    )
+    geojson: GeoJSONInput
 
 
 class Phenomenon(BaseModel):

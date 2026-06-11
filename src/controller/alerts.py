@@ -13,7 +13,7 @@ from container import (
     get_mysql_repo,
     get_taviso_repo,
 )
-from controller.schemas import AlertSummary, GeoJSONInput, Phenomenon
+from controller.schemas import AlertCreateRequest, AlertSummary, Phenomenon
 from domain.models import PolygonTooLargeError
 from ports.mysql_repository import IMySQLRepository
 from ports.taviso_repository import ITavisoReadRepository
@@ -23,23 +23,21 @@ router = APIRouter(prefix="/alerts", tags=["Alerts"])
 
 
 @router.post(
-    "/generate",
+    "",
     summary="Generate weather alert maps",
     response_description="Returns metadata and URLs to generated GIF maps",
 )
 async def generate_alert(
-    geojson: GeoJSONInput,
-    phenomenon_code: int = Query(
-        ..., ge=1, le=92, description="Weather phenomenon code (1-92)"
-    ),
+    request: AlertCreateRequest,
     service: AlertGenerationService = Depends(get_alert_service),
     logger=Depends(get_logger),
 ):
     """
     Generate weather alert GIF maps for the given polygon and phenomenon.
 
-    - **Body**: GeoJSON Geometry, Feature, or FeatureCollection
+    Request body:
     - **phenomenon_code**: Integer code for the weather phenomenon (1-92)
+    - **geojson**: GeoJSON Geometry, Feature, or FeatureCollection
 
     Returns URLs to two generated GIF files:
     - `gif_area_url`: Zoomed map of the affected area with labeled municipalities
@@ -49,7 +47,8 @@ async def generate_alert(
     """
     start_time = time.perf_counter()
     try:
-        geometry = geojson.extract_geometry()
+        phenomenon_code = request.phenomenon_code
+        geometry = request.geojson.extract_geometry()
         logger.info(
             f"generate_alert: processing (phenomenon={phenomenon_code},"
             f" type={geometry.get('type')})"
