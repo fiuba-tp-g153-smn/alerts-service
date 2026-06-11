@@ -6,15 +6,14 @@ that service does not exist, so we simulate it: an AFTER INSERT trigger on
 `taviso_temporal` calls a stored procedure that inserts a mirrored row into the
 `taviso` table (created unqualified in the same primary database by migration 005).
 
-Cross-host triggers are impossible, so this is gated by MANAGE_TAVISO_SCHEMA and
-is a no-op in production. Depends on revision 005 having created the taviso table.
+Cross-host triggers are impossible, so this is gated (like all migrations) by
+MANAGE_DB_SCHEMAS — centralized in alembic/env.py — and is a no-op in production.
+Depends on revision 005 having created the taviso table.
 
 Revision ID: 006
 Revises: 005
 Create Date: 2026-06-01
 """
-
-import os
 
 from alembic import op
 
@@ -27,14 +26,7 @@ PROCEDURE_NAME = "sp_simulate_taviso_sync"
 TRIGGER_NAME = "trg_taviso_temporal_after_insert"
 
 
-def _manage_enabled() -> bool:
-    return os.getenv("MANAGE_TAVISO_SCHEMA", "").lower() in ("1", "true", "yes")
-
-
 def upgrade() -> None:
-    if not _manage_enabled():
-        return  # Production: never create the simulation objects.
-
     # Drop first so the migration is idempotent across re-runs.
     op.execute(f"DROP TRIGGER IF EXISTS {TRIGGER_NAME}")
     op.execute(f"DROP PROCEDURE IF EXISTS {PROCEDURE_NAME}")
@@ -81,8 +73,5 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    if not _manage_enabled():
-        return
-
     op.execute(f"DROP TRIGGER IF EXISTS {TRIGGER_NAME}")
     op.execute(f"DROP PROCEDURE IF EXISTS {PROCEDURE_NAME}")

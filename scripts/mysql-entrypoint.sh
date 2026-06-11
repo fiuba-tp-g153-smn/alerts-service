@@ -19,7 +19,7 @@ set -e
 #     - DML + DDL on the app database.
 #     - TRIGGER + routine privileges so Alembic migration 006 can create the
 #       dev/test taviso sync stored procedure and trigger. In real production the
-#       migration is gated off (MANAGE_TAVISO_SCHEMA unset) so these go unused.
+#       migration is gated off (MANAGE_DB_SCHEMAS unset) so these go unused.
 #
 #   ${MYSQL_READONLY_USER} (e.g. avisos)
 #     - External readonly user (SELECT only, rate-limited).
@@ -36,10 +36,11 @@ CREATE DATABASE IF NOT EXISTS \`${MYSQL_DATABASE}\` CHARACTER SET utf8mb4 COLLAT
 -- (Alembic migration 006) while binary logging is enabled. Re-applied each startup.
 SET GLOBAL log_bin_trust_function_creators = 1;
 
--- App user: DML + DDL for normal operations and Alembic migrations, plus TRIGGER and
--- routine privileges for the dev/test taviso sync simulation (migration 006).
+-- App user: DML + DDL for normal operations and Alembic migrations, plus TRIGGER,
+-- routine and EVENT privileges for the dev/test taviso sync simulation (migrations
+-- 006 and 008).
 CREATE USER IF NOT EXISTS '${MYSQL_USER}'@'%' IDENTIFIED BY '${MYSQL_PASSWORD}';
-GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, ALTER, DROP, INDEX, REFERENCES, TRIGGER, CREATE ROUTINE, ALTER ROUTINE, EXECUTE ON \`${MYSQL_DATABASE}\`.* TO '${MYSQL_USER}'@'%';
+GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, ALTER, DROP, INDEX, REFERENCES, TRIGGER, CREATE ROUTINE, ALTER ROUTINE, EXECUTE, EVENT ON \`${MYSQL_DATABASE}\`.* TO '${MYSQL_USER}'@'%';
 
 -- External readonly user: SELECT only, rate-limited. Also serves the app's read-only
 -- connection to the \`taviso\` table (same database in dev/test).
@@ -56,4 +57,4 @@ EOF
 # redundant since our grants file creates it. Root password is still needed.
 unset MYSQL_DATABASE MYSQL_USER MYSQL_PASSWORD
 
-exec docker-entrypoint.sh mysqld --init-file=/tmp/grants.sql "$@"
+exec docker-entrypoint.sh mysqld --event-scheduler=ON --init-file=/tmp/grants.sql "$@"
