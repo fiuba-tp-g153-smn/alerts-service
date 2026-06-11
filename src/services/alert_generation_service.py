@@ -62,6 +62,8 @@ class AlertGenerationService:  # pylint: disable=too-few-public-methods
          - timestamp: Timestamp string used in filenames
         - phenomenon_code: Input phenomenon code
          - phenomenon: Full text description
+         - area: HTML with affected departments grouped by province
+         - polygon: Serialized polygon ("[lat,lon],[lat,lon],...")
          - gif_area_url: URL path to area GIF
          - gif_gral_url: URL path to country GIF
          - affected_departments_count: Number of affected departments
@@ -140,6 +142,8 @@ class AlertGenerationService:  # pylint: disable=too-few-public-methods
             "timestamp": timestamp,
             "phenomenon_code": phenomenon_code,
             "phenomenon": phenomenon_text,
+            "area": area_html,
+            "polygon": polygon_str,
             "gif_area_url": f"/alerts/{gif_area_filename}",
             "gif_gral_url": f"/alerts/{gif_gral_filename}",
             "affected_departments_count": len(affected_departments),

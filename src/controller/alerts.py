@@ -48,6 +48,10 @@ async def generate_alert(
     - `gif_area_url`: Zoomed map of the affected area with labeled municipalities
     - `gif_gral_url`: Full Argentina map with the alert polygon highlighted
 
+    The response also includes `area` (HTML with affected departments grouped by
+    province) and `polygon` (serialized coordinates), matching the shape of the
+    pending alerts returned by `GET /alerts/pending`.
+
     Also inserts the alert record into the `taviso_temporal` table in MySQL.
     """
     start_time = time.perf_counter()
