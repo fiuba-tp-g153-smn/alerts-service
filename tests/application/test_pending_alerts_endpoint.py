@@ -22,18 +22,17 @@ class FakeMySQLRepository(IMySQLRepository):
         return rows
 
     def get_pending_alerts_etag(self) -> Tuple[int, Optional[int]]:
-        max_id = max(
-            (r["IdAviso_temporal"] for r in self._rows), default=None
-        )
+        max_id = max((r["IdAviso_temporal"] for r in self._rows), default=None)
         return (len(self._rows), max_id)
 
     def get_departments(self) -> List[dict]:
         return []
 
-    def insert_alert(
-        self, phenomenon, area, polygon, gif_general, gif_zoom
-    ) -> int:
+    def insert_alert(self, phenomenon, area, polygon, gif_general, gif_zoom) -> int:
         return 0
+
+    def get_polygon_max_length(self) -> int:
+        return 1000
 
     def get_phenomenon_text(self, code: int) -> Optional[str]:
         return None

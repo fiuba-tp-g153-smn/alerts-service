@@ -73,6 +73,11 @@ class AlertGenerationService:  # pylint: disable=too-few-public-methods
         if not phenomenon_text:
             raise ValueError(f"Invalid phenomenon code: {phenomenon_code}")
 
+        # 1b. Validate polygon size against the DB column limit before doing any
+        # expensive work (polygon_str depends only on the input geometry).
+        polygon_str = self._format_polygon(geometry)
+        await self._validate_polygon_size(polygon_str)
+
         # 2. Calculate intersection with departments (reuse existing service)
         self.logger.info(f"Calculating intersections for phenomenon {phenomenon_code}")
         departments = await self.geo_service.intersect_departments(
@@ -101,7 +106,6 @@ class AlertGenerationService:  # pylint: disable=too-few-public-methods
 
         # 5. Save to database
         area_html = self._format_area_html(affected_departments)
-        polygon_str = self._format_polygon(geometry)
         self.logger.info(
             "Final polygon sizes; phenomenon text length: %d, "
             "area html length: %d, polygon str length: %d",
@@ -110,15 +114,6 @@ class AlertGenerationService:  # pylint: disable=too-few-public-methods
             len(polygon_str),
         )
         self.logger.info("polygon str value: %s", polygon_str)
-
-        if len(polygon_str) > self.settings.polygon_db_max_chars:
-            raise PolygonTooLargeError(
-                f"Polygon serialization is {len(polygon_str)} characters"
-                f", exceeds DB column limit of"
-                f" {self.settings.polygon_db_max_chars}."
-                " Use more aggresive simplification to reduce"
-                " the number of vertices in the input polygon."
-            )
 
         # Extract just the filename from full path (persisted in DB and used for URL)
         gif_area_filename = os.path.basename(worker_result["gif_area"])
@@ -353,6 +348,22 @@ class AlertGenerationService:  # pylint: disable=too-few-public-methods
                 for prov, names in sorted(by_prov.items())
             )
             or "(Sin departamentos en el área)"
+        )
+
+    async def _validate_polygon_size(self, polygon_str: str) -> None:
+        """Raise PolygonTooLargeError if polygon_str exceeds the DB column limit.
+
+        N is the VARCHAR character limit of taviso_temporal.Poligono, queried from
+        the DB. The maximum vertex count is derived as (N + 1) // 16.
+        """
+        max_chars = await asyncio.to_thread(self.mysql_repo.get_polygon_max_length)
+        if len(polygon_str) <= max_chars:
+            return
+        raise PolygonTooLargeError(
+            f"Polygon serialization is {len(polygon_str)} characters, exceeds DB"
+            f" column limit of {max_chars}. Use more aggressive simplification to"
+            " reduce the number of vertices in the input polygon.",
+            max_vertex_count=(max_chars + 1) // 16,
         )
 
     def _format_polygon(self, geometry: dict) -> str:

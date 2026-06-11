@@ -67,7 +67,10 @@ async def generate_alert(
         return JSONResponse(content=result)
     except PolygonTooLargeError as e:
         logger.error(f"generate_alert: polygon too large: {e}")
-        raise HTTPException(status_code=400, detail=str(e)) from e
+        return JSONResponse(
+            status_code=413,
+            content={"max_vertex_count": e.max_vertex_count},
+        )
     except ValueError as e:
         logger.warning(f"generate_alert: bad request: {e}")
         raise HTTPException(status_code=400, detail=str(e)) from e

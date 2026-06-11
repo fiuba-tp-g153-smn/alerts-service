@@ -146,6 +146,29 @@ class MySQLAlertsRepository(IMySQLRepository):
                 cursor.close()
             conn.close()
 
+    def get_polygon_max_length(self) -> int:
+        """Return the VARCHAR character limit of taviso_temporal.Poligono."""
+        conn = self.pool.get_connection()
+        cursor = None
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT CHARACTER_MAXIMUM_LENGTH FROM INFORMATION_SCHEMA.COLUMNS"
+                " WHERE TABLE_SCHEMA = DATABASE()"
+                "   AND TABLE_NAME = 'taviso_temporal'"
+                "   AND COLUMN_NAME = 'Poligono'"
+            )
+            row = cursor.fetchone()
+            if row is None or row[0] is None:
+                raise RuntimeError(
+                    "Could not determine VARCHAR limit of taviso_temporal.Poligono"
+                )
+            return int(row[0])
+        finally:
+            if cursor is not None:
+                cursor.close()
+            conn.close()
+
     def get_phenomenon_text(self, code: int) -> Optional[str]:
         """Get phenomenon description by code."""
         return PHENOMENA.get(code)

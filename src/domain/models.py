@@ -6,7 +6,15 @@ from typing import List, Optional
 
 
 class PolygonTooLargeError(ValueError):
-    """Raised when the serialized polygon exceeds the database column limit."""
+    """Raised when the serialized polygon exceeds the database column limit.
+
+    Carries `max_vertex_count`: the maximum number of vertices the input polygon
+    may have to fit the column, derived from the column's character limit.
+    """
+
+    def __init__(self, message: str, max_vertex_count: int):
+        super().__init__(message)
+        self.max_vertex_count = max_vertex_count
 
 
 class LayerType(Enum):
