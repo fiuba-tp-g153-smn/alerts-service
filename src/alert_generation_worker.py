@@ -64,13 +64,13 @@ CUARTERON_SVG_PATH = "/app/data_alerts/cuarteron.svg"
 # ---------------------------------------------------------------------------
 HEADER_H = 1.0 / 9.0
 PHENOM_H = 2.0 / 27.0
-HEADER_Y = 1.0 - HEADER_H        # 8/9
-PHENOM_Y = HEADER_Y - PHENOM_H   # 22/27
-MAP_TOP = PHENOM_Y               # map fills [0, 22/27]
+HEADER_Y = 1.0 - HEADER_H  # 8/9
+PHENOM_Y = HEADER_Y - PHENOM_H  # 22/27
+MAP_TOP = PHENOM_Y  # map fills [0, 22/27]
 
 # Header palette
 HEADER_BG = "#252c4f"
-HEADER_ALPHA = 0.9               # 10% transparency
+HEADER_ALPHA = 0.9  # 10% transparency
 
 _IGN: dict | None = None  # loaded lazily on first call inside main()
 _CUARTERON_PNG: np.ndarray | None = None  # rasterised once per process
@@ -271,6 +271,7 @@ def _etiqueta_departamento(
 # IGN base-map layers loader
 # ---------------------------------------------------------------------------
 
+
 def _cargar_capas_ign(cache_path: str) -> dict:
     """
     Load IGN geometries from the pre-built pickle.
@@ -278,8 +279,13 @@ def _cargar_capas_ign(cache_path: str) -> dict:
     (allows the worker to run even before the cache is ready).
     """
     empty: dict = {
-        "grupo_a": [], "grupo_b": [], "grupo_c": [], "grupo_d": [],
-        "provincias": [], "paises": [], "toponimos": [],
+        "grupo_a": [],
+        "grupo_b": [],
+        "grupo_c": [],
+        "grupo_d": [],
+        "provincias": [],
+        "paises": [],
+        "toponimos": [],
     }
     if not os.path.exists(cache_path):
         print(
@@ -300,6 +306,7 @@ def _cargar_capas_ign(cache_path: str) -> dict:
             capas[key] = [shapely_wkb.loads(w, hex=True) for w in wkb_list]
     return capas
 
+
 def _agregar_marca_de_agua(fig):
     """Add a low-opacity watermark over the map area (not header/phenom)."""
     if os.path.exists(WATERMARK_PATH):
@@ -308,16 +315,19 @@ def _agregar_marca_de_agua(fig):
         # nunca lo invade. Logo es ~cuadrado; ajustamos ancho según aspect de figura.
         wm_y = 0.02
         gap = 0.015
-        wm_h = MAP_TOP - wm_y - gap            # alto = casi toda el área del mapa
+        wm_h = MAP_TOP - wm_y - gap  # alto = casi toda el área del mapa
         fw_in, fh_in = fig.get_size_inches()
-        wm_w = wm_h * (fh_in / fw_in)          # mantiene aspect 1:1 visual
+        wm_w = wm_h * (fh_in / fw_in)  # mantiene aspect 1:1 visual
         wm_x = (1.0 - wm_w) / 2.0
         ax_wm = fig.add_axes([wm_x, wm_y, wm_w, wm_h], facecolor="none")
         ax_wm.set_zorder(100)
         ax_wm.axis("off")
         ax_wm.imshow(img, alpha=0.3, zorder=100)
     else:
-        print(f"ATENCION: No se encontró el logo en la ruta: {WATERMARK_PATH}", file=sys.stderr)
+        print(
+            f"ATENCION: No se encontró el logo en la ruta: {WATERMARK_PATH}",
+            file=sys.stderr,
+        )
 
 
 def _load_index(path: str) -> list:
@@ -372,11 +382,13 @@ def _load_cuarteron_png(target_px: int = 600) -> np.ndarray | None:
         return _CUARTERON_PNG
     if not os.path.exists(CUARTERON_SVG_PATH):
         print(
-            f"ATENCION: cuarterón no encontrado en {CUARTERON_SVG_PATH}", file=sys.stderr,
+            f"ATENCION: cuarterón no encontrado en {CUARTERON_SVG_PATH}",
+            file=sys.stderr,
         )
         return None
     try:
         import cairosvg  # local import: heavy native dep, optional
+
         png_bytes = cairosvg.svg2png(url=CUARTERON_SVG_PATH, output_width=target_px)
         arr = np.array(Image.open(io.BytesIO(png_bytes)).convert("RGBA"))
         # Pedido SMN: fondo gris (#bebebe) translúcido para que se vea celeste del
@@ -388,7 +400,9 @@ def _load_cuarteron_png(target_px: int = 600) -> np.ndarray | None:
             & (np.abs(g.astype(int) - 190) < 25)
             & (np.abs(b.astype(int) - 190) < 25)
         )
-        arr[is_bg, 3] = 0   # fondo gris totalmente transparente — celeste del mapa pasa limpio
+        arr[is_bg, 3] = (
+            0  # fondo gris totalmente transparente — celeste del mapa pasa limpio
+        )
         _CUARTERON_PNG = arr
         return _CUARTERON_PNG
     except Exception as exc:  # pylint: disable=broad-exception-caught
@@ -464,7 +478,9 @@ def _panel_aviso(fig, texto, modo="area"):
 
     ax_hdr.add_patch(
         mpatches.Rectangle(
-            (0, 0), 1, 1,
+            (0, 0),
+            1,
+            1,
             facecolor=HEADER_BG,
             # alpha=HEADER_ALPHA,
             edgecolor="none",
@@ -490,13 +506,18 @@ def _panel_aviso(fig, texto, modo="area"):
         except Exception as exc:  # pylint: disable=broad-exception-caught
             print(f"ATENCION: fallo cargando logo header: {exc}", file=sys.stderr)
     else:
-        print(f"ATENCION: logo header no encontrado en {HEADER_LOGO_PATH}", file=sys.stderr)
+        print(
+            f"ATENCION: logo header no encontrado en {HEADER_LOGO_PATH}",
+            file=sys.stderr,
+        )
 
     # Title — centred, white
     ax_hdr.text(
-        0.5, 0.5,
+        0.5,
+        0.5,
         "AVISO A CORTO PLAZO",
-        ha="center", va="center",
+        ha="center",
+        va="center",
         fontsize=34,
         color="white",
         fontproperties=FONT_BLACK,
@@ -512,7 +533,9 @@ def _panel_aviso(fig, texto, modo="area"):
 
     ax_ph.add_patch(
         mpatches.Rectangle(
-            (0, 0), 1, 1,
+            (0, 0),
+            1,
+            1,
             facecolor="white",
             edgecolor="red",
             linewidth=2.5,
@@ -522,9 +545,11 @@ def _panel_aviso(fig, texto, modo="area"):
     )
 
     ax_ph.text(
-        0.02, 0.78,
+        0.02,
+        0.78,
         "EL AREA GRAFICADA EN EL MAPA DELIMITA LA OCURRENCIA DE:",
-        ha="left", va="center",
+        ha="left",
+        va="center",
         fontsize=16,
         color="#000000",
         fontproperties=FONT_MEDIUM,
@@ -533,9 +558,11 @@ def _panel_aviso(fig, texto, modo="area"):
     )
 
     ax_ph.text(
-        0.5, 0.30,
+        0.5,
+        0.30,
         texto,
-        ha="center", va="center",
+        ha="center",
+        va="center",
         fontsize=19,
         color="red",
         fontproperties=FONT_SEMIBOLD,
@@ -647,41 +674,52 @@ def _agregar_capas_ign(ax: GeoAxes, modo: str = "area") -> None:
             #   'isla'     -> nombres de islas del Atlántico Sur, itálica muy pequeña
             if tipo == "arg":
                 ax.text(
-                    lon, lat, nombre,
+                    lon,
+                    lat,
+                    nombre,
                     transform=ccrs.PlateCarree(),
                     fontsize=6,
                     fontweight="bold",
                     color="#111111",
-                    ha="center", va="center",
+                    ha="center",
+                    va="center",
                     clip_on=True,
                     zorder=10,
                 )
             elif tipo == "continen":
                 ax.text(
-                    lon, lat, nombre,
+                    lon,
+                    lat,
+                    nombre,
                     transform=ccrs.PlateCarree(),
                     fontsize=5.5,
                     fontstyle="italic",
                     color="#111111",
-                    ha="center", va="center",
+                    ha="center",
+                    va="center",
                     clip_on=True,
                     zorder=10,
                 )
             elif tipo == "isla":
                 ax.text(
-                    lon, lat, nombre,
+                    lon,
+                    lat,
+                    nombre,
                     transform=ccrs.PlateCarree(),
                     fontsize=5,
                     fontstyle="italic",
                     color="#333333",
-                    ha="center", va="center",
+                    ha="center",
+                    va="center",
                     clip_on=True,
                     zorder=10,
                 )
 
+
 # ---------------------------------------------------------------------------
 # GIF generation functions
 # ---------------------------------------------------------------------------
+
 
 def generar_gif_area(  # pylint: disable=too-many-locals
     text,
@@ -824,12 +862,27 @@ def generar_gif_area(  # pylint: disable=too-many-locals
         c_marker = "o" if caba_affected else "."
         c_size = 5 if caba_affected else 3.5
         c_z_pt, c_z_txt = (13, 14) if caba_affected else (11, 12)
-        ax.plot(caba_lon, caba_lat, c_marker, color=c_color, markersize=c_size,
-                transform=ccrs.PlateCarree(), zorder=c_z_pt)
-        ax.text(caba_lon + 0.04, caba_lat + 0.03, "CABA", fontsize=7.5,
-                color="#111111", fontweight="bold", transform=ccrs.PlateCarree(),
-                zorder=c_z_txt, clip_on=True,
-                path_effects=[pe.withStroke(linewidth=2, foreground="white")])
+        ax.plot(
+            caba_lon,
+            caba_lat,
+            c_marker,
+            color=c_color,
+            markersize=c_size,
+            transform=ccrs.PlateCarree(),
+            zorder=c_z_pt,
+        )
+        ax.text(
+            caba_lon + 0.04,
+            caba_lat + 0.03,
+            "CABA",
+            fontsize=7.5,
+            color="#111111",
+            fontweight="bold",
+            transform=ccrs.PlateCarree(),
+            zorder=c_z_txt,
+            clip_on=True,
+            path_effects=[pe.withStroke(linewidth=2, foreground="white")],
+        )
 
     _agregar_marca_de_agua(fig)
 
@@ -845,7 +898,9 @@ def generar_gif_area(  # pylint: disable=too-many-locals
         tmp, format="png", bbox_inches=None, pad_inches=0, facecolor="white", dpi=80
     )
     plt.close(fig)
-    Image.open(tmp).convert("RGB").convert("P", palette=Image.Palette.ADAPTIVE).save(out, format="GIF")
+    Image.open(tmp).convert("RGB").convert("P", palette=Image.Palette.ADAPTIVE).save(
+        out, format="GIF"
+    )
     os.remove(tmp)
 
     return out
@@ -929,7 +984,9 @@ def generar_gif_general(text, coords, timestamp, output_dir, dept_geoms, prov_ge
         tmp, format="png", bbox_inches=None, pad_inches=0, facecolor="white", dpi=80
     )
     plt.close(fig_final)
-    Image.open(tmp).convert("RGB").convert("P", palette=Image.Palette.ADAPTIVE).save(out, format="GIF")
+    Image.open(tmp).convert("RGB").convert("P", palette=Image.Palette.ADAPTIVE).save(
+        out, format="GIF"
+    )
     os.remove(tmp)
 
     return out

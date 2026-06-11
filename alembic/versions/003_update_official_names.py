@@ -12,10 +12,15 @@ down_revision = "002"
 branch_labels = None
 depends_on = None
 
+
 def upgrade() -> None:
     op.execute("SET FOREIGN_KEY_CHECKS = 0;")
-    op.execute("ALTER TABLE `departamentos` MODIFY COLUMN `id_localidad` varchar(10) NOT NULL;")
-    op.execute("ALTER TABLE `departamentos_email` MODIFY COLUMN `id_localidad` varchar(10) NOT NULL;")
+    op.execute(
+        "ALTER TABLE `departamentos` MODIFY COLUMN `id_localidad` varchar(10) NOT NULL;"
+    )
+    op.execute(
+        "ALTER TABLE `departamentos_email` MODIFY COLUMN `id_localidad` varchar(10) NOT NULL;"
+    )
     op.execute("TRUNCATE TABLE `departamentos_email`;")
     op.execute("TRUNCATE TABLE `provincia_email`;")
     op.execute("TRUNCATE TABLE `departamentos`;")
@@ -598,6 +603,7 @@ def upgrade() -> None:
         """
     )
     op.execute("SET FOREIGN_KEY_CHECKS = 1;")
+
 
 def downgrade() -> None:
     pass  # Este script truncó tablas, hacer downgrade requeriría restaurar datos

@@ -200,14 +200,18 @@ def _leer_toponimos_manual(shp_path: str, logger: Logger) -> list:
                 for fname, ftype, flen in fields:
                     raw = f.read(flen)
                     if ftype == "C":
-                        rec[fname] = raw.rstrip(b"\x00 ").decode("latin-1", errors="replace")
+                        rec[fname] = raw.rstrip(b"\x00 ").decode(
+                            "latin-1", errors="replace"
+                        )
                     elif ftype in ("N", "F"):
                         try:
                             rec[fname] = float(raw.strip()) if raw.strip() else None
                         except ValueError:
                             rec[fname] = None
                     else:
-                        rec[fname] = raw.rstrip(b"\x00").decode("latin-1", errors="replace")
+                        rec[fname] = raw.rstrip(b"\x00").decode(
+                            "latin-1", errors="replace"
+                        )
                 if flag != b"*":  # no es registro eliminado
                     attrs.append(rec)
     except Exception as exc:
@@ -241,7 +245,11 @@ def _leer_toponimos_manual(shp_path: str, logger: Logger) -> list:
 
     # --- Combinar y filtrar --------------------------------------------------
     TIPOS = {"arg", "continen", "isla"}
-    EXCLUIR = {"ISLAS AURORA (Arg.)", "ISLAS GEORGIAS DEL SUR (Arg.)", "ISLAS SANDWICH DEL SUR (Arg.)"}
+    EXCLUIR = {
+        "ISLAS AURORA (Arg.)",
+        "ISLAS GEORGIAS DEL SUR (Arg.)",
+        "ISLAS SANDWICH DEL SUR (Arg.)",
+    }
     resultado: list = []
     for (lon, lat), attr in zip(coords, attrs):
         if lon is None:
@@ -276,7 +284,9 @@ def _build_ign_cache_sync(cache_dir: str, logger: Logger) -> None:
       toponimos – point labels: (Arg.) markers + island/country names   (text)
     """
     if not os.path.exists(_LIMITES_SHP):
-        logger.warning("IGN shapefiles not found at %s — skipping ign_capas.pkl", _DATOS_DIR)
+        logger.warning(
+            "IGN shapefiles not found at %s — skipping ign_capas.pkl", _DATOS_DIR
+        )
         return
 
     out_path = os.path.join(cache_dir, "ign_capas.pkl")
@@ -300,8 +310,11 @@ def _build_ign_cache_sync(cache_dir: str, logger: Logger) -> None:
     obj_col = "Objeto" if "Objeto" in lim.columns else "objeto"
     nam_col = "NAM" if "NAM" in lim.columns else "nam"
 
-    GRUPO_A = {"Límite internacional", "Límite del lecho y subsuelo del Río de la Plata",
-                "Límite lateral marítimo argentino-uruguayo"}
+    GRUPO_A = {
+        "Límite internacional",
+        "Límite del lecho y subsuelo del Río de la Plata",
+        "Límite lateral marítimo argentino-uruguayo",
+    }
     GRUPO_B = {"Límite Interprovincial", "Línea de costa"}
     GRUPO_C = {"Límite exterior del Río de la Plata"}
     SECTOR_ANTARTICO = "Límite del Sector Antártico Argentino"
