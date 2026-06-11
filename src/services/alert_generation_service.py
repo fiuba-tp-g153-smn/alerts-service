@@ -91,7 +91,7 @@ class AlertGenerationService:  # pylint: disable=too-few-public-methods
         )
 
         # 4. Generate GIFs via subprocess worker
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        timestamp = datetime.now().strftime("%y%m%d%H%M%S")
         worker_result = await self._run_visualization_worker(
             geometry, phenomenon_text, timestamp, affected_departments, all_departments
         )

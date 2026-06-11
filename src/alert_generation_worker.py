@@ -9,7 +9,7 @@ Input JSON:
 {
     "geometry_wkb_hex": "...",
     "phenomenon_text": "TORMENTAS...",
-    "timestamp": "20260315_143052",
+    "timestamp": "260315143052",
     "affected_departments": [{...}],
     "all_departments": [{...}],
     "output_dir": "/app/output/alerts",
@@ -19,8 +19,8 @@ Input JSON:
 Output JSON:
 {
     "status": "success",
-    "gif_area": "/app/output/alerts/20260315_143052_aviso.gif",
-    "gif_gral": "/app/output/alerts/20260315_143052_gral.gif"
+    "gif_area": "/app/output/alerts/aviso_260315143052.gif",
+    "gif_gral": "/app/output/alerts/avi_gral_260315143052.gif"
 }
 """
 
@@ -892,7 +892,7 @@ def generar_gif_area(  # pylint: disable=too-many-locals
 
     _panel_aviso(fig, text, modo="area")
 
-    out = os.path.join(output_dir, f"{timestamp}_aviso.gif")
+    out = os.path.join(output_dir, f"aviso_{timestamp}.gif")
     tmp = out.replace(".gif", "_tmp.png")
     fig.savefig(
         tmp, format="png", bbox_inches=None, pad_inches=0, facecolor="white", dpi=80
@@ -978,7 +978,7 @@ def generar_gif_general(text, coords, timestamp, output_dir, dept_geoms, prov_ge
 
     _panel_aviso(fig_final, text, modo="gral")
 
-    out = os.path.join(output_dir, f"{timestamp}_gral.gif")
+    out = os.path.join(output_dir, f"avi_gral_{timestamp}.gif")
     tmp = out.replace(".gif", "_tmp.png")
     fig_final.savefig(
         tmp, format="png", bbox_inches=None, pad_inches=0, facecolor="white", dpi=80
