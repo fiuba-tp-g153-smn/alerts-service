@@ -13,7 +13,12 @@ from container import (
     get_mysql_repo,
     get_taviso_repo,
 )
-from controller.schemas import AlertCreateRequest, AlertSummary, Phenomenon
+from controller.schemas import (
+    AlertCreateRequest,
+    AlertSummary,
+    PendingAlertSummary,
+    Phenomenon,
+)
 from domain.models import PolygonTooLargeError
 from ports.mysql_repository import IMySQLRepository
 from ports.taviso_repository import ITavisoReadRepository
@@ -105,6 +110,62 @@ async def get_phenomena(
 def _normalize_etag(raw: str) -> str:
     """Strip weak-validator prefix and surrounding whitespace from an ETag value."""
     return raw.strip().removeprefix("W/").strip()
+
+
+@router.get(
+    "/pending",
+    summary="List pending alerts",
+    response_description="Returns pending alerts from the taviso_temporal table",
+    response_model=List[PendingAlertSummary],
+)
+async def get_pending_alerts(
+    response: Response,
+    since_id: Optional[int] = Query(
+        None,
+        ge=0,
+        description="Return only pending alerts with IdAviso_temporal greater than this",
+    ),
+    if_none_match: Optional[str] = Header(None),
+    mysql_repo: IMySQLRepository = Depends(get_mysql_repo),
+    logger=Depends(get_logger),
+):
+    """
+    List pending alerts (`taviso_temporal` rows with `Procesado='N'`) — generated
+    by POST /alerts but not yet mirrored into the active `taviso` table.
+
+    - **since_id** (optional): only return alerts with `IdAviso_temporal` greater
+      than it.
+
+    Supports conditional requests: the response carries an `ETag` of the form
+    `"<count>-<max_id>"` over the pending set. The count detects removals
+    (alerts processed, `Procesado` 'N'->'Y') and max_id detects insertions, so
+    the ETag changes on any add or removal. Send it back as `If-None-Match` to
+    get `304 Not Modified` while the pending set is unchanged. The ETag is opaque
+    — do not reuse it as `since_id`.
+    """
+    try:
+        count, max_id = await asyncio.to_thread(mysql_repo.get_pending_alerts_etag)
+        etag = f'"{count}-{max_id or 0}"'
+
+        if if_none_match and _normalize_etag(if_none_match) == etag:
+            return Response(status_code=304, headers={"ETag": etag})
+
+        rows = await asyncio.to_thread(mysql_repo.get_pending_alerts, since_id)
+        response.headers["ETag"] = etag
+        return [
+            PendingAlertSummary(
+                alert_id=row["IdAviso_temporal"],
+                phenomenon=row["Fenomeno"],
+                area=row["Area"],
+                polygon=row["Poligono"],
+                gif_gral_url=f"/alerts/{row['Gif_general']}",
+                gif_area_url=f"/alerts/{row['Gif_zoom']}",
+            )
+            for row in rows
+        ]
+    except Exception as e:
+        logger.error(f"get_pending_alerts: unexpected error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.get(

@@ -1,6 +1,6 @@
 """MySQL adapter for alert database operations."""
 
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 from mysql.connector import pooling
 
@@ -98,6 +98,49 @@ class MySQLAlertsRepository(IMySQLRepository):
             )
             conn.commit()
             return cursor.lastrowid
+        finally:
+            if cursor is not None:
+                cursor.close()
+            conn.close()
+
+    def get_pending_alerts(self, since_id: Optional[int] = None) -> List[dict]:
+        """Return pending alerts (taviso_temporal with Procesado='N'), optionally
+        filtered to those with IdAviso_temporal greater than since_id."""
+        conn = self.pool.get_connection()
+        cursor = None
+        try:
+            cursor = conn.cursor(dictionary=True)
+            cursor.execute(
+                """
+                SELECT IdAviso_temporal, Fenomeno, Area, Poligono,
+                       Gif_general, Gif_zoom
+                FROM taviso_temporal
+                WHERE Procesado = 'N'
+                  AND (%s IS NULL OR IdAviso_temporal > %s)
+                ORDER BY IdAviso_temporal
+                """,
+                (since_id, since_id),
+            )
+            return cursor.fetchall()
+        finally:
+            if cursor is not None:
+                cursor.close()
+            conn.close()
+
+    def get_pending_alerts_etag(self) -> Tuple[int, Optional[int]]:
+        """Return (count, max_id) of pending alerts in a single query."""
+        conn = self.pool.get_connection()
+        cursor = None
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT COUNT(*), MAX(IdAviso_temporal) FROM taviso_temporal"
+                " WHERE Procesado = 'N'"
+            )
+            row = cursor.fetchone()
+            if row is None:
+                return (0, None)
+            return (int(row[0]), row[1])
         finally:
             if cursor is not None:
                 cursor.close()

@@ -1,7 +1,7 @@
 """Abstract interface for MySQL alert operations."""
 
 from abc import ABC, abstractmethod
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 
 class IMySQLRepository(ABC):
@@ -21,6 +21,19 @@ class IMySQLRepository(ABC):
         gif_zoom: str,
     ) -> int:
         """Insert alert record and return ID."""
+
+    @abstractmethod
+    def get_pending_alerts(self, since_id: Optional[int] = None) -> List[dict]:
+        """Return pending alerts, optionally only those with IdAviso_temporal
+        greater than since_id, ordered by id."""
+
+    @abstractmethod
+    def get_pending_alerts_etag(self) -> Tuple[int, Optional[int]]:
+        """Return (count, max_id) of pending alerts for ETag computation.
+
+        `count` detects removals (Procesado 'N'->'Y'); `max_id` detects new
+        insertions (ids are monotonic). Together they change whenever the
+        pending set gains or loses a member. `max_id` is None when empty."""
 
     @abstractmethod
     def get_phenomenon_text(self, code: int) -> Optional[str]:
