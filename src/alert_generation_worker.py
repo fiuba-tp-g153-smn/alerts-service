@@ -175,6 +175,8 @@ _CABECERAS_NACIONAL_PARES = {
     ("Santa Fe", "La Capital"): "Santa Fe de la Veracruz",
     ("Santa Fe", "Castellanos"): "Rafaela",
     ("Santa Fe", "General Obligado"): "Reconquista",
+    ("Santa Fe", "General López"): "Venado Tuerto",
+    ("Santa Fe", "San Cristóbal"): "Ceres",
     # --- San Juan ---
     ("San Juan", "Capital"): "Ciudad de San Juan",
     ("San Juan", "Jáchal"): "San José de Jáchal",
