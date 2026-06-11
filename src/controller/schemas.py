@@ -60,6 +60,12 @@ class Phenomenon(BaseModel):
     description: Optional[str]
 
 
+class AlertLimits(BaseModel):
+    """Limits for alert generation derived from the database schema."""
+
+    max_vertex_count: int
+
+
 class AlertSummary(BaseModel):
     """Summary of an active alert from the external taviso table.
 

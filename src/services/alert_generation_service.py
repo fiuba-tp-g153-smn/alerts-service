@@ -350,12 +350,22 @@ class AlertGenerationService:  # pylint: disable=too-few-public-methods
             or "(Sin departamentos en el área)"
         )
 
-    async def _validate_polygon_size(self, polygon_str: str) -> None:
-        """Raise PolygonTooLargeError if polygon_str exceeds the DB column limit.
+    async def get_max_vertex_count(self) -> int:
+        """Return the maximum number of polygon vertices that fit the DB column.
 
         N is the VARCHAR character limit of taviso_temporal.Poligono, queried from
         the DB. The maximum vertex count is derived as (N + 1) // 16.
         """
+        max_chars = await asyncio.to_thread(self.mysql_repo.get_polygon_max_length)
+        return self._max_vertex_count(max_chars)
+
+    @staticmethod
+    def _max_vertex_count(max_chars: int) -> int:
+        """Derive the max polygon vertex count from the column char limit."""
+        return (max_chars + 1) // 16
+
+    async def _validate_polygon_size(self, polygon_str: str) -> None:
+        """Raise PolygonTooLargeError if polygon_str exceeds the DB column limit."""
         max_chars = await asyncio.to_thread(self.mysql_repo.get_polygon_max_length)
         if len(polygon_str) <= max_chars:
             return
@@ -363,7 +373,7 @@ class AlertGenerationService:  # pylint: disable=too-few-public-methods
             f"Polygon serialization is {len(polygon_str)} characters, exceeds DB"
             f" column limit of {max_chars}. Use more aggressive simplification to"
             " reduce the number of vertices in the input polygon.",
-            max_vertex_count=(max_chars + 1) // 16,
+            max_vertex_count=self._max_vertex_count(max_chars),
         )
 
     def _format_polygon(self, geometry: dict) -> str:

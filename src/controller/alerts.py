@@ -15,6 +15,7 @@ from container import (
 )
 from controller.schemas import (
     AlertCreateRequest,
+    AlertLimits,
     AlertSummary,
     PendingAlertSummary,
     Phenomenon,
@@ -107,6 +108,30 @@ async def get_phenomena(
         return result
     except Exception as e:
         logger.error(f"get_phenomena: unexpected error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@router.get(
+    "/limits",
+    summary="Get alert generation limits",
+    response_description="Returns max polygon vertex count allowed for alert generation",
+    response_model=AlertLimits,
+)
+async def get_alert_limits(
+    service: AlertGenerationService = Depends(get_alert_service),
+    logger=Depends(get_logger),
+):
+    """
+    Get alert generation limits.
+
+    Returns:
+    - **max_vertex_count**: maximum number of vertices an input polygon may have.
+    """
+    try:
+        max_vertex_count = await service.get_max_vertex_count()
+        return AlertLimits(max_vertex_count=max_vertex_count)
+    except Exception as e:
+        logger.error(f"get_alert_limits: unexpected error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
