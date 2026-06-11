@@ -77,15 +77,24 @@ class MySQLAlertsRepository(IMySQLRepository):
                 cursor.close()
             conn.close()
 
-    def insert_alert(self, phenomenon: str, area: str, polygon: str) -> int:
+    def insert_alert(
+        self,
+        phenomenon: str,
+        area: str,
+        polygon: str,
+        gif_general: str,
+        gif_zoom: str,
+    ) -> int:
         """Insert alert record and return the generated ID."""
         conn = self.pool.get_connection()
         cursor = None
         try:
             cursor = conn.cursor()
             cursor.execute(
-                "INSERT INTO taviso_temporal (fenomeno, area, poligono) VALUES (%s, %s, %s)",
-                (phenomenon, area, polygon),
+                "INSERT INTO taviso_temporal"
+                " (fenomeno, area, poligono, Gif_general, Gif_zoom)"
+                " VALUES (%s, %s, %s, %s, %s)",
+                (phenomenon, area, polygon, gif_general, gif_zoom),
             )
             conn.commit()
             return cursor.lastrowid

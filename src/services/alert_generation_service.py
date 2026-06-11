@@ -120,14 +120,20 @@ class AlertGenerationService:  # pylint: disable=too-few-public-methods
                 " the number of vertices in the input polygon."
             )
 
-        alert_id = self.mysql_repo.insert_alert(phenomenon_text, area_html, polygon_str)
+        # Extract just the filename from full path (persisted in DB and used for URL)
+        gif_area_filename = os.path.basename(worker_result["gif_area"])
+        gif_gral_filename = os.path.basename(worker_result["gif_gral"])
+
+        alert_id = self.mysql_repo.insert_alert(
+            phenomenon_text,
+            area_html,
+            polygon_str,
+            gif_general=gif_gral_filename,
+            gif_zoom=gif_area_filename,
+        )
 
         duration = time.perf_counter() - t0
         self.logger.info(f"Alert {alert_id} generated in {duration:.2f}s")
-
-        # Extract just the filename from full path for URL
-        gif_area_filename = os.path.basename(worker_result["gif_area"])
-        gif_gral_filename = os.path.basename(worker_result["gif_gral"])
 
         return {
             "alert_id": alert_id,

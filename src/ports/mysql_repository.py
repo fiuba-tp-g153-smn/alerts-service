@@ -12,7 +12,14 @@ class IMySQLRepository(ABC):
         """Return all departments with coordinates."""
 
     @abstractmethod
-    def insert_alert(self, phenomenon: str, area: str, polygon: str) -> int:
+    def insert_alert(
+        self,
+        phenomenon: str,
+        area: str,
+        polygon: str,
+        gif_general: str,
+        gif_zoom: str,
+    ) -> int:
         """Insert alert record and return ID."""
 
     @abstractmethod
