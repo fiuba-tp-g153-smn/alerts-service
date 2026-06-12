@@ -8,7 +8,7 @@ from ports.geo_layer_processor import IGeoLayerProcessor
 from ports.object_storage import IObjectStorage
 from services.layer_refresh_service import LayerRefreshService
 
-_TEST_LEVELS = {1: 0.001}  # 1 level → 2 simplified + 2 fgb = 4 files total
+_TEST_LEVELS = {1: 0.001}  # 1 level → 2 simplified files total (pais + departamentos)
 
 
 @pytest.fixture
@@ -59,17 +59,16 @@ async def test_run_success_returns_success_result(service, tmp_raw_files):
 
     assert result.status == "success"
     assert isinstance(result.files, list)
-    assert len(result.files) == 4
+    assert len(result.files) == 2
     assert any("pais_simple_L" in f and "_T" in f for f in result.files)
     assert any("departamentos_simple_L" in f and "_T" in f for f in result.files)
-    assert any(f.endswith(".fgb") for f in result.files)
     assert result.error is None
 
 
-async def test_run_success_uploads_four_files(service, mock_storage, tmp_raw_files):
+async def test_run_success_uploads_two_files(service, mock_storage, tmp_raw_files):
     await service.run()
 
-    assert mock_storage.upload.call_count == 4
+    assert mock_storage.upload.call_count == 2
 
 
 async def test_run_deletes_old_s3_keys_before_uploading(
@@ -87,26 +86,6 @@ async def test_run_deletes_old_s3_keys_before_uploading(
     mock_storage.delete.assert_called_once_with(
         "pais_simple_L1_T0p0005_20240101.geojson"
     )
-
-
-async def test_run_does_not_delete_simplified_keys_when_uploading_fgb(
-    service, mock_storage, tmp_raw_files
-):
-    simplified_key = "pais_simple_L1_T0p001_20260322.geojson"
-    old_fgb_key = "pais_20260315.fgb"
-
-    async def mock_list_keys(prefix):
-        if prefix == "pais_":
-            return [simplified_key, old_fgb_key]
-        return []
-
-    mock_storage.list_keys.side_effect = mock_list_keys
-
-    await service.run()
-
-    deleted_keys = [call.args[0] for call in mock_storage.delete.call_args_list]
-    assert old_fgb_key in deleted_keys
-    assert simplified_key not in deleted_keys
 
 
 async def test_run_failure_returns_failed_result(service, mock_processor):
@@ -162,17 +141,6 @@ async def test_run_failure_when_simplify_raises_returns_failed_result(
 
     assert result.status == "failed"
     assert "simplify failed" in result.error
-
-
-async def test_run_failure_when_convert_to_fgb_raises_returns_failed_result(
-    service, mock_processor, tmp_raw_files
-):
-    mock_processor.convert_to_fgb.side_effect = RuntimeError("fgb conversion failed")
-
-    result = await service.run()
-
-    assert result.status == "failed"
-    assert "fgb conversion failed" in result.error
 
 
 async def test_run_failure_when_storage_upload_raises_returns_failed_result(

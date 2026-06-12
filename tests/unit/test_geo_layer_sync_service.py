@@ -54,8 +54,6 @@ async def test_ensure_all_returns_empty_when_all_files_present(
         (
             tmp_path / f"departamentos_simple_L{level}_T{tol_str}_20260322.geojson"
         ).touch()
-    (tmp_path / "pais_20260322.fgb").touch()
-    (tmp_path / "departamentos_20260322.fgb").touch()
 
     result = await service.ensure_all()
 
@@ -65,34 +63,12 @@ async def test_ensure_all_returns_empty_when_all_files_present(
 async def test_ensure_all_returns_layer_when_simplified_missing(
     service, mock_settings, tmp_path
 ):
-    # Only fgb present, no simplified files
-    (tmp_path / "pais_20260322.fgb").touch()
-    (tmp_path / "departamentos_20260322.fgb").touch()
-
+    # Nothing present locally — both levels missing for both layers
     result = await service.ensure_all()
 
     assert len(result) == 2
-    for layer, missing_levels, fgb_needed in result:
+    for _layer, missing_levels in result:
         assert len(missing_levels) == 2  # both levels missing
-        assert not fgb_needed
-
-
-async def test_ensure_all_returns_layer_when_fgb_missing(
-    service, mock_settings, tmp_path
-):
-    # Simplified present, fgb missing
-    for level, tol_str in [(1, "0p001"), (2, "0p01")]:
-        (tmp_path / f"pais_simple_L{level}_T{tol_str}_20260322.geojson").touch()
-        (
-            tmp_path / f"departamentos_simple_L{level}_T{tol_str}_20260322.geojson"
-        ).touch()
-
-    result = await service.ensure_all()
-
-    assert len(result) == 2
-    for layer, missing_levels, fgb_needed in result:
-        assert missing_levels == []
-        assert fgb_needed
 
 
 # ── stale file cleanup ────────────────────────────────────────────────────────
@@ -105,7 +81,7 @@ async def test_reconcile_simplified_purges_wrong_tolerance_local_file(
     wrong_tol_file.touch()
 
     await service._reconcile_simplified(
-        {"simplified_stem": "pais_simple", "fgb_stem": "pais"},
+        {"simplified_stem": "pais_simple"},
         level=1,
         tolerance=0.001,  # correct tolerance is 0p001, file has 0p05
     )
@@ -122,7 +98,7 @@ async def test_reconcile_simplified_purges_old_date_local_file(
     new_file.touch()
 
     result = await service._reconcile_simplified(
-        {"simplified_stem": "pais_simple", "fgb_stem": "pais"},
+        {"simplified_stem": "pais_simple"},
         level=1,
         tolerance=0.001,
     )
@@ -147,7 +123,7 @@ async def test_reconcile_simplified_purges_stale_s3_keys(
     )
 
     await service._reconcile_simplified(
-        {"simplified_stem": "pais_simple", "fgb_stem": "pais"},
+        {"simplified_stem": "pais_simple"},
         level=1,
         tolerance=0.001,
     )
@@ -169,7 +145,7 @@ async def test_reconcile_simplified_downloads_from_s3_when_local_missing(
     mock_storage.download.return_value = True
 
     result = await service._reconcile_simplified(
-        {"simplified_stem": "pais_simple", "fgb_stem": "pais"},
+        {"simplified_stem": "pais_simple"},
         level=1,
         tolerance=0.001,
     )
@@ -189,7 +165,7 @@ async def test_reconcile_simplified_returns_false_when_s3_download_fails(
     mock_storage.download.return_value = False
 
     result = await service._reconcile_simplified(
-        {"simplified_stem": "pais_simple", "fgb_stem": "pais"},
+        {"simplified_stem": "pais_simple"},
         level=1,
         tolerance=0.001,
     )
@@ -205,7 +181,7 @@ async def test_reconcile_simplified_uploads_to_s3_when_s3_missing(
     mock_storage.list_keys.return_value = []
 
     await service._reconcile_simplified(
-        {"simplified_stem": "pais_simple", "fgb_stem": "pais"},
+        {"simplified_stem": "pais_simple"},
         level=1,
         tolerance=0.001,
     )
@@ -220,49 +196,12 @@ async def test_reconcile_simplified_returns_false_when_nothing_exists(
     mock_storage.list_keys.return_value = []
 
     result = await service._reconcile_simplified(
-        {"simplified_stem": "pais_simple", "fgb_stem": "pais"},
+        {"simplified_stem": "pais_simple"},
         level=1,
         tolerance=0.001,
     )
 
     assert result is False
-
-
-# ── FGB reconciliation ────────────────────────────────────────────────────────
-
-
-async def test_reconcile_fgb_returns_true_when_file_present(
-    service, mock_settings, tmp_path
-):
-    (tmp_path / "pais_20260322.fgb").touch()
-
-    result = await service._reconcile_fgb({"fgb_stem": "pais"})
-
-    assert result is True
-
-
-async def test_reconcile_fgb_returns_false_when_nothing_exists(
-    service, mock_settings, mock_storage, tmp_path
-):
-    mock_storage.list_keys.return_value = []
-
-    result = await service._reconcile_fgb({"fgb_stem": "pais"})
-
-    assert result is False
-
-
-async def test_reconcile_fgb_purges_old_date_local_file(
-    service, mock_settings, tmp_path
-):
-    old_file = tmp_path / "pais_20240101.fgb"
-    new_file = tmp_path / "pais_20260322.fgb"
-    old_file.touch()
-    new_file.touch()
-
-    await service._reconcile_fgb({"fgb_stem": "pais"})
-
-    assert not old_file.exists()
-    assert new_file.exists()
 
 
 # ── no S3 configured ─────────────────────────────────────────────────────────
@@ -275,7 +214,7 @@ async def test_reconcile_simplified_skips_s3_when_no_bucket(
     (tmp_path / "pais_simple_L1_T0p001_20260322.geojson").touch()
 
     await service._reconcile_simplified(
-        {"simplified_stem": "pais_simple", "fgb_stem": "pais"},
+        {"simplified_stem": "pais_simple"},
         level=1,
         tolerance=0.001,
     )
@@ -293,7 +232,6 @@ async def test_regenerate_removes_raw_tmp_on_success(
     raw_tmp = tmp_path / "pais_raw_tmp.geojson"
     layer = {
         "simplified_stem": "pais_simple",
-        "fgb_stem": "pais",
         "url_attr": "country_geojson_url",
         "raw_tmp": "pais_raw_tmp.geojson",
     }
@@ -304,7 +242,7 @@ async def test_regenerate_removes_raw_tmp_on_success(
         Path(path).touch()
 
     mock_processor.download.side_effect = fake_download
-    service._needs_regen = [(layer, [(1, 0.001)], False)]
+    service._needs_regen = [(layer, [(1, 0.001)])]
 
     await service.regenerate()
 
@@ -317,7 +255,6 @@ async def test_regenerate_removes_raw_tmp_on_processor_failure(
     raw_tmp = tmp_path / "pais_raw_tmp.geojson"
     layer = {
         "simplified_stem": "pais_simple",
-        "fgb_stem": "pais",
         "url_attr": "country_geojson_url",
         "raw_tmp": "pais_raw_tmp.geojson",
     }
@@ -329,7 +266,7 @@ async def test_regenerate_removes_raw_tmp_on_processor_failure(
 
     mock_processor.download.side_effect = fake_download
     mock_processor.simplify.side_effect = RuntimeError("simplify failed")
-    service._needs_regen = [(layer, [(1, 0.001)], False)]
+    service._needs_regen = [(layer, [(1, 0.001)])]
 
     with pytest.raises(RuntimeError, match="simplify failed"):
         await service.regenerate()

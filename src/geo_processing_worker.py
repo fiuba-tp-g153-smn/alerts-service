@@ -1,6 +1,6 @@
-"""Subprocess worker for heavy geo processing (simplify, fgb conversion).
+"""Subprocess worker for heavy geo processing (simplify).
 
-Input (stdin): [{"op": "simplify"|"convert_fgb", "in_path": "...", "out_path": "...",
+Input (stdin): [{"op": "simplify", "in_path": "...", "out_path": "...",
                  "tolerance": 0.01}]
 Output: exits 0 on success, 1 on error (errors printed to stderr).
 """
@@ -26,7 +26,7 @@ def _write_atomic(gdf, out_path: str, driver: str) -> None:
 
 
 def main():
-    """Read geo processing tasks from stdin and execute each op (simplify or convert_fgb)."""
+    """Read geo processing tasks from stdin and execute each op (simplify)."""
     tasks = json.load(sys.stdin)
     for task in tasks:
         op = task["op"]
@@ -38,8 +38,6 @@ def main():
                 tolerance, preserve_topology=True
             )
             _write_atomic(gdf, out_path, "GeoJSON")
-        elif op == "convert_fgb":
-            _write_atomic(gdf, out_path, "FlatGeobuf")
         else:
             print(f"Unknown op: {op}", file=sys.stderr)
             sys.exit(1)

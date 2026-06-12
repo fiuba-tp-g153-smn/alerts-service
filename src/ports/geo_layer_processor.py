@@ -40,7 +40,3 @@ class IGeoLayerProcessor(ABC):
     @abstractmethod
     async def simplify(self, in_path: str, out_path: str, tolerance: float) -> None:
         """Simplify a GeoJSON layer with the given tolerance and save to out_path."""
-
-    @abstractmethod
-    async def convert_to_fgb(self, in_path: str, out_path: str) -> None:
-        """Convert a GeoJSON file to FlatGeobuf format."""

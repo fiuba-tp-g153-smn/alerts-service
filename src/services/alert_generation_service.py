@@ -270,7 +270,7 @@ class AlertGenerationService:  # pylint: disable=too-few-public-methods
         affected_departments,
         all_departments,
     ) -> dict:
-        """Run visualization in isolated subprocess (follows fullres_worker pattern)."""
+        """Run visualization in an isolated subprocess to contain GeoPandas memory."""
         dept_index_path = os.path.join(self.settings.alert_cache_dir, "dept_index.pkl")
         prov_index_path = os.path.join(self.settings.alert_cache_dir, "prov_index.pkl")
         dept_index = await self._get_dept_index(dept_index_path)

@@ -8,31 +8,8 @@ import pytest
 from adapters.geo_layer_repository import (
     FileSystemGeoLayerRepository,
     _simplified_stem,
-    _versioned_stem,
 )
 from domain.models import LayerType
-
-
-def test_versioned_stem_returns_latest(tmp_path):
-    (tmp_path / "pais_20240101.geojson").touch()
-    (tmp_path / "pais_20240201.geojson").touch()
-    (tmp_path / "pais_20240301.geojson").touch()
-
-    result = _versioned_stem(str(tmp_path), "pais")
-
-    assert result.endswith("pais_20240301.geojson")
-
-
-def test_versioned_stem_raises_when_no_files(tmp_path):
-    with pytest.raises(FileNotFoundError):
-        _versioned_stem(str(tmp_path), "pais")
-
-
-def test_versioned_stem_ignores_non_date_suffixed_files(tmp_path):
-    (tmp_path / "pais_simple.geojson").touch()
-
-    with pytest.raises(FileNotFoundError):
-        _versioned_stem(str(tmp_path), "pais_simple")
 
 
 def test_simplified_stem_returns_latest(tmp_path):
@@ -134,52 +111,6 @@ async def test_get_layer_different_levels_cached_independently(
     await repo.get_layer(LayerType.COUNTRY, 2)
 
     assert mock_read_file.call_count == 2
-
-
-def test_get_fullres_geojson_path_returns_latest_for_departments(tmp_path):
-    logger = MagicMock()
-    repo = FileSystemGeoLayerRepository(str(tmp_path), logger)
-
-    (tmp_path / "departamentos_20240101.geojson").touch()
-    (tmp_path / "departamentos_20240301.geojson").touch()
-
-    result = repo.get_fullres_geojson_path(LayerType.DEPARTMENTS)
-
-    assert "departamentos_" in result
-    assert "_simple_" not in result
-    assert result.endswith("departamentos_20240301.geojson")
-
-
-def test_get_fullres_fgb_path_returns_latest(tmp_path):
-    logger = MagicMock()
-    repo = FileSystemGeoLayerRepository(str(tmp_path), logger)
-
-    (tmp_path / "pais_20240101.fgb").touch()
-    (tmp_path / "pais_20240301.fgb").touch()
-
-    result = repo.get_fullres_fgb_path(LayerType.COUNTRY)
-
-    assert result.endswith("pais_20240301.fgb")
-
-
-def test_get_fullres_fgb_path_returns_departments_latest(tmp_path):
-    logger = MagicMock()
-    repo = FileSystemGeoLayerRepository(str(tmp_path), logger)
-
-    (tmp_path / "departamentos_20240101.fgb").touch()
-    (tmp_path / "departamentos_20240301.fgb").touch()
-
-    result = repo.get_fullres_fgb_path(LayerType.DEPARTMENTS)
-
-    assert result.endswith("departamentos_20240301.fgb")
-
-
-def test_get_fullres_fgb_path_raises_when_no_fgb(tmp_path):
-    logger = MagicMock()
-    repo = FileSystemGeoLayerRepository(str(tmp_path), logger)
-
-    with pytest.raises(FileNotFoundError):
-        repo.get_fullres_fgb_path(LayerType.COUNTRY)
 
 
 @pytest.mark.asyncio

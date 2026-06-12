@@ -78,10 +78,3 @@ class GeoLayerProcessor(IGeoLayerProcessor):
             ]
         )
         self._logger.info(f"Simplified → {out_path}")
-
-    async def convert_to_fgb(self, in_path: str, out_path: str) -> None:
-        self._logger.info(f"Converting {in_path} to FlatGeobuf ...")
-        await _run_worker(
-            [{"op": "convert_fgb", "in_path": in_path, "out_path": out_path}]
-        )
-        self._logger.info(f"Converted → {out_path}")

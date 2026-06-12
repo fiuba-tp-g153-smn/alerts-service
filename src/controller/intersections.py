@@ -21,10 +21,10 @@ router = APIRouter(prefix="/intersect", tags=["Geo Intersection"])
 async def intersect_country(
     geojson: GeoJSONInput,
     simplification_level: int = Query(
-        0,
-        ge=0,
+        1,
+        ge=1,
         le=10,
-        description="0 = full resolution, 1-10 = simplified layer with increasing result tolerance",
+        description="Simplified layer level (1-10) with increasing result tolerance",
     ),
     service: GeoIntersectionService = Depends(get_intersection_service),
     logger=Depends(get_logger),
@@ -68,10 +68,10 @@ async def intersect_country(
 async def intersect_departments(
     geojson: GeoJSONInput,
     simplification_level: int = Query(
-        0,
-        ge=0,
+        1,
+        ge=1,
         le=10,
-        description="0 = full resolution, 1–10 = simplified layer with increasing result tolerance",
+        description="Simplified layer level (1–10) with increasing result tolerance",
     ),
     service: GeoIntersectionService = Depends(get_intersection_service),
     logger=Depends(get_logger),
