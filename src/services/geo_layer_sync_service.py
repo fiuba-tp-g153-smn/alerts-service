@@ -14,13 +14,11 @@ if TYPE_CHECKING:
 LAYERS = [
     {
         "simplified_stem": "pais_simple",
-        "fgb_stem": "pais",
         "url_attr": "country_geojson_url",
         "raw_tmp": "pais_raw_tmp.geojson",
     },
     {
         "simplified_stem": "departamentos_simple",
-        "fgb_stem": "departamentos",
         "url_attr": "departments_geojson_url",
         "raw_tmp": "departamentos_raw_tmp.geojson",
     },
@@ -57,11 +55,11 @@ class GeoLayerSyncService:  # pylint: disable=too-few-public-methods
         self.storage = storage
         self.processor = processor
         self.logger = logger
-        self._needs_regen: list[tuple[dict, list[tuple[int, float]], bool]] = []
+        self._needs_regen: list[tuple[dict, list[tuple[int, float]]]] = []
 
-    async def ensure_all(self) -> list[tuple[dict, list[tuple[int, float]], bool]]:
-        """Reconcile all layers. Returns list of (layer_info, missing_levels, fgb_needed)."""
-        levels: dict[int, float] = self.settings.simplification_levels
+    async def ensure_all(self) -> list[tuple[dict, list[tuple[int, float]]]]:
+        """Reconcile all layers. Returns list of (layer_info, missing_levels)."""
+        levels: dict[int, float] = self.settings.detail_levels
         needs_regen = []
 
         for layer in LAYERS:
@@ -70,10 +68,8 @@ class GeoLayerSyncService:  # pylint: disable=too-few-public-methods
                 if not await self._reconcile_simplified(layer, level, tolerance):
                     missing_levels.append((level, tolerance))
 
-            fgb_needed = not await self._reconcile_fgb(layer)
-
-            if missing_levels or fgb_needed:
-                needs_regen.append((layer, missing_levels, fgb_needed))
+            if missing_levels:
+                needs_regen.append((layer, missing_levels))
 
         self.logger.info("All geo layers reconciled.")
         self._needs_regen = needs_regen
@@ -82,8 +78,8 @@ class GeoLayerSyncService:  # pylint: disable=too-few-public-methods
     async def regenerate(self) -> None:
         """Download from IGN and re-generate any files flagged missing by ensure_all()."""
         data_dir = self.settings.data_dir
-        for layer, missing_levels, fgb_needed in self._needs_regen:
-            self.logger.info(f"Re-generating layer: {layer['fgb_stem']} ...")
+        for layer, missing_levels in self._needs_regen:
+            self.logger.info(f"Re-generating layer: {layer['simplified_stem']} ...")
             url = getattr(self.settings, layer["url_attr"])
             raw_tmp = os.path.join(data_dir, layer["raw_tmp"])
 
@@ -99,15 +95,6 @@ class GeoLayerSyncService:  # pylint: disable=too-few-public-methods
                     await self.processor.simplify(raw_tmp, simplified_path, tolerance)
                     if self.settings.s3_bucket_name:
                         await self.storage.upload(simplified_path, versioned)
-
-                if fgb_needed:
-                    fgb_key = IGeoLayerProcessor.versioned_key(
-                        f"{layer['fgb_stem']}.fgb"
-                    )
-                    fgb_path = os.path.join(data_dir, fgb_key)
-                    await self.processor.convert_to_fgb(raw_tmp, fgb_path)
-                    if self.settings.s3_bucket_name:
-                        await self.storage.upload(fgb_path, fgb_key)
 
             finally:
                 if os.path.exists(raw_tmp):
@@ -147,35 +134,6 @@ class GeoLayerSyncService:  # pylint: disable=too-few-public-methods
 
         self._purge_stale_local(all_local, canonical_filename)
         await self._purge_stale_s3(all_s3, canonical_filename)
-
-        if not await self._ensure_local(canonical_filename, canonical_path):
-            return False
-
-        await self._ensure_s3(
-            canonical_filename, canonical_path, s3_date, canonical_date
-        )
-        self.logger.info(f"{canonical_filename}: ready.")
-        return True
-
-    async def _reconcile_fgb(self, layer: dict) -> bool:
-        """Ensure the canonical FlatGeobuf file exists. Purges non-canonical versions."""
-        data_dir = self.settings.data_dir
-        stem = layer["fgb_stem"]
-
-        local_files = sorted(_glob.glob(os.path.join(data_dir, f"{stem}_????????.fgb")))
-        s3_keys = await self._s3_keys(f"{stem}_", ".fgb")
-        local_date = _extract_date(local_files[-1]) if local_files else None
-        s3_date = _extract_date(sorted(s3_keys)[-1]) if s3_keys else None
-
-        if local_date is None and s3_date is None:
-            return False
-
-        canonical_date = max(d for d in [local_date, s3_date] if d is not None)
-        canonical_filename = f"{stem}_{canonical_date}.fgb"
-        canonical_path = os.path.join(data_dir, canonical_filename)
-
-        self._purge_stale_local(local_files, canonical_filename)
-        await self._purge_stale_s3(s3_keys, canonical_filename)
 
         if not await self._ensure_local(canonical_filename, canonical_path):
             return False

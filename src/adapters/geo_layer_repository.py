@@ -6,7 +6,6 @@ import os
 import time
 from dataclasses import dataclass
 from logging import Logger
-from pathlib import Path
 
 import geopandas as gpd
 
@@ -18,20 +17,7 @@ _SIMPLIFIED_STEMS = {
     LayerType.DEPARTMENTS: "departamentos_simple",
 }
 
-_FULLRES_STEMS = {
-    LayerType.COUNTRY: "pais",
-    LayerType.DEPARTMENTS: "departamentos",
-}
-
 _EVICTION_SWEEP_INTERVAL_S = 60
-
-
-def _versioned_stem(data_dir: str, stem: str) -> str:
-    """Return the path to the latest versioned full-res GeoJSON matching the given stem."""
-    matches = sorted(glob.glob(os.path.join(data_dir, f"{stem}_????????.geojson")))
-    if not matches:
-        raise FileNotFoundError(f"No data file found for {stem}")
-    return matches[-1]
 
 
 def _simplified_stem(data_dir: str, stem: str, level: int) -> str:
@@ -70,10 +56,10 @@ class FileSystemGeoLayerRepository(IGeoLayerRepository):
             self._locks[key] = asyncio.Lock()
         return self._locks[key]
 
-    async def get_layer(self, layer: LayerType, level: int) -> gpd.GeoDataFrame:
-        """Return the GeoDataFrame for the given layer and simplification level."""
-        key = (layer, level)
-        path = _simplified_stem(self.data_dir, _SIMPLIFIED_STEMS[layer], level)
+    async def get_layer(self, layer: LayerType, detail_level: int) -> gpd.GeoDataFrame:
+        """Return the GeoDataFrame for the given layer and detail level."""
+        key = (layer, detail_level)
+        path = _simplified_stem(self.data_dir, _SIMPLIFIED_STEMS[layer], detail_level)
 
         # Fast path — no lock needed; dict reads are atomic in CPython event loop
         entry = self._cache.get(key)
@@ -100,18 +86,6 @@ class FileSystemGeoLayerRepository(IGeoLayerRepository):
                 path=path, gdf=gdf, last_used=time.monotonic()
             )
             return gdf
-
-    def get_fullres_geojson_path(self, layer: LayerType) -> str:
-        """Return the filesystem path for the latest full-res GeoJSON file."""
-        return _versioned_stem(self.data_dir, _FULLRES_STEMS[layer])
-
-    def get_fullres_fgb_path(self, layer: LayerType) -> str:
-        """Return the filesystem path for the latest full-res FlatGeobuf file."""
-        stem = _FULLRES_STEMS[layer]
-        paths = sorted(Path(self.data_dir).glob(f"{stem}_????????.fgb"))
-        if not paths:
-            raise FileNotFoundError(f"No .fgb file found for {layer}")
-        return str(paths[-1])
 
     def start_eviction_loop(self) -> None:
         """Start the background TTL eviction task."""

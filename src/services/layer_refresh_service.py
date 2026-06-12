@@ -13,8 +13,6 @@ from ports.object_storage import IObjectStorage
 if TYPE_CHECKING:
     from settings import Settings
 
-_FGB_FILES = ["pais.fgb", "departamentos.fgb"]
-
 
 class LayerRefreshService:  # pylint: disable=too-few-public-methods
     """Orchestrates a full layer refresh: download from IGN, simplify, and sync to S3."""
@@ -35,7 +33,7 @@ class LayerRefreshService:  # pylint: disable=too-few-public-methods
     def _simplified_fnames(self) -> list[str]:
         """Return simplified GeoJSON filenames (with tolerance) for all configured levels."""
         fnames = []
-        for level, tolerance in self.settings.simplification_levels.items():
+        for level, tolerance in self.settings.detail_levels.items():
             tol = IGeoLayerProcessor.tolerance_str(tolerance)
             fnames.append(f"pais_simple_L{level}_T{tol}.geojson")
             fnames.append(f"departamentos_simple_L{level}_T{tol}.geojson")
@@ -44,7 +42,7 @@ class LayerRefreshService:  # pylint: disable=too-few-public-methods
     async def _upload_files(self, data_dir: str) -> list[str]:
         """Delete old S3 keys for each level and upload the current versioned files."""
         uploaded: list[str] = []
-        for fname in self._simplified_fnames() + _FGB_FILES:
+        for fname in self._simplified_fnames():
             new_key = IGeoLayerProcessor.versioned_key(fname)
             local = os.path.join(data_dir, new_key)
             ext = os.path.splitext(fname)[1]
@@ -67,7 +65,7 @@ class LayerRefreshService:  # pylint: disable=too-few-public-methods
     async def _simplify_layers(self, country_tmp: str, deptos_tmp: str) -> None:
         self.logger.info("Simplifying layers ...")
         data_dir = self.settings.data_dir
-        for level, tolerance in self.settings.simplification_levels.items():
+        for level, tolerance in self.settings.detail_levels.items():
             for stem, tmp in [
                 ("pais_simple", country_tmp),
                 ("departamentos_simple", deptos_tmp),
@@ -79,22 +77,6 @@ class LayerRefreshService:  # pylint: disable=too-few-public-methods
                     ),
                 )
                 await self.processor.simplify(tmp, out, tolerance)
-
-    async def _convert_to_fgb_layers(self, country_tmp: str, deptos_tmp: str) -> None:
-        self.logger.info("Converting layers to FlatGeobuf ...")
-        data_dir = self.settings.data_dir
-        await asyncio.gather(
-            self.processor.convert_to_fgb(
-                country_tmp,
-                os.path.join(data_dir, IGeoLayerProcessor.versioned_key("pais.fgb")),
-            ),
-            self.processor.convert_to_fgb(
-                deptos_tmp,
-                os.path.join(
-                    data_dir, IGeoLayerProcessor.versioned_key("departamentos.fgb")
-                ),
-            ),
-        )
 
     def _cleanup_tmp(self, country_tmp: str, deptos_tmp: str) -> None:
         self.logger.info("Removing temporary raw files ...")
@@ -113,7 +95,6 @@ class LayerRefreshService:  # pylint: disable=too-few-public-methods
         try:
             await self._download_layers(country_tmp, deptos_tmp)
             await self._simplify_layers(country_tmp, deptos_tmp)
-            await self._convert_to_fgb_layers(country_tmp, deptos_tmp)
             self.logger.info("Uploading layers to S3 ...")
             updated_files = await self._upload_files(data_dir)
             duration = time.monotonic() - start
