@@ -80,6 +80,9 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    # Let browsers read the ETag of /alerts and /alerts/pending so the
+    # visualizer can poll with If-None-Match.
+    expose_headers=["ETag"],
 )
 
 app.include_router(general.router)
