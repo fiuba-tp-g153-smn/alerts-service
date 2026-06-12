@@ -4,7 +4,6 @@ import geopandas as gpd
 import pytest
 from shapely.geometry import box
 
-from domain.models import LayerType
 from services.geo_intersection_service import GeoIntersectionService
 
 
@@ -16,7 +15,8 @@ def mock_logger():
 @pytest.fixture
 def mock_repo():
     repo = MagicMock()
-    repo.get_layer = AsyncMock()
+    repo.get_country_layer = AsyncMock()
+    repo.get_departments_layer = AsyncMock()
     return repo
 
 
@@ -61,11 +61,11 @@ def test_geometry():
 async def test_intersect_country_simplified_returns_feature_collection(
     service, mock_repo, country_gdf, test_geometry
 ):
-    mock_repo.get_layer.return_value = country_gdf
+    mock_repo.get_country_layer.return_value = country_gdf
 
     result = await service.intersect_country(test_geometry, detail_level=1)
 
-    mock_repo.get_layer.assert_called_once_with(LayerType.COUNTRY, 1)
+    mock_repo.get_country_layer.assert_called_once_with(1)
     assert result["type"] == "FeatureCollection"
     assert len(result["features"]) > 0
     assert result["features"][0]["geometry"]["type"] in (
@@ -78,18 +78,18 @@ async def test_intersect_country_simplified_returns_feature_collection(
 async def test_intersect_country_simplified_passes_correct_level_to_repo(
     service, mock_repo, country_gdf, test_geometry
 ):
-    mock_repo.get_layer.return_value = country_gdf
+    mock_repo.get_country_layer.return_value = country_gdf
 
     await service.intersect_country(test_geometry, detail_level=3)
 
-    call_args = mock_repo.get_layer.call_args
-    assert call_args.args == (LayerType.COUNTRY, 3)
+    call_args = mock_repo.get_country_layer.call_args
+    assert call_args.args == (3,)
 
 
 async def test_intersect_country_simplified_no_intersection(service, mock_repo):
     geom = box(-80, -50, -70, -40)
     gdf = gpd.GeoDataFrame({"name": ["Far Away"]}, geometry=[geom], crs="EPSG:4326")
-    mock_repo.get_layer.return_value = gdf
+    mock_repo.get_country_layer.return_value = gdf
 
     test_geom = {
         "type": "Polygon",
@@ -112,11 +112,11 @@ async def test_intersect_country_simplified_no_intersection(service, mock_repo):
 async def test_intersect_departments_simplified_filters_correctly(
     service, mock_repo, deptos_gdf, test_geometry
 ):
-    mock_repo.get_layer.return_value = deptos_gdf
+    mock_repo.get_departments_layer.return_value = deptos_gdf
 
-    result = await service.intersect_departments(test_geometry, detail_level=1)
+    result = await service.intersect_departments(test_geometry)
 
-    mock_repo.get_layer.assert_called_once_with(LayerType.DEPARTMENTS, 1)
+    mock_repo.get_departments_layer.assert_called_once_with()
     assert len(result) == 1
     assert result[0]["properties"]["nombre"] == "Dep1"
     assert "geometry" in result[0]
@@ -139,9 +139,9 @@ async def test_intersect_departments_simplified_returns_correct_structure_for_ea
             ]
         ],
     }
-    mock_repo.get_layer.return_value = deptos_gdf
+    mock_repo.get_departments_layer.return_value = deptos_gdf
 
-    result = await service.intersect_departments(wide_geometry, detail_level=1)
+    result = await service.intersect_departments(wide_geometry)
 
     assert len(result) == 2
     for feature in result:
@@ -160,7 +160,7 @@ async def test_intersect_departments_simplified_no_match(service, mock_repo):
         geometry=[geom1, geom2],
         crs="EPSG:4326",
     )
-    mock_repo.get_layer.return_value = gdf
+    mock_repo.get_departments_layer.return_value = gdf
 
     test_geom = {
         "type": "Polygon",
@@ -175,7 +175,7 @@ async def test_intersect_departments_simplified_no_match(service, mock_repo):
         ],
     }
 
-    result = await service.intersect_departments(test_geom, detail_level=1)
+    result = await service.intersect_departments(test_geom)
 
     assert result == []
 

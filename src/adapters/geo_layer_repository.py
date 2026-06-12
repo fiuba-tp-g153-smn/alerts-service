@@ -19,16 +19,22 @@ _SIMPLIFIED_STEMS = {
 
 _EVICTION_SWEEP_INTERVAL_S = 60
 
+_CacheKey = tuple[LayerType, int | None]
 
-def _simplified_stem(data_dir: str, stem: str, level: int) -> str:
-    """Return the path to the latest versioned simplified GeoJSON for the given level."""
-    matches = sorted(
-        glob.glob(os.path.join(data_dir, f"{stem}_L{level}_T*_????????.geojson"))
+
+def _simplified_stem(data_dir: str, stem: str, level: int | None) -> str:
+    """Return the path to the latest versioned simplified GeoJSON for the given level.
+
+    `level` is None for layers that only have a single, unlevelled file.
+    """
+    pattern = (
+        f"{stem}_T*_????????.geojson"
+        if level is None
+        else f"{stem}_L{level}_T*_????????.geojson"
     )
+    matches = sorted(glob.glob(os.path.join(data_dir, pattern)))
     if not matches:
-        raise FileNotFoundError(
-            f"No simplified data file found for {stem} level {level}"
-        )
+        raise FileNotFoundError(f"No simplified data file found for {stem} level {level}")
     return matches[-1]
 
 
@@ -47,16 +53,26 @@ class FileSystemGeoLayerRepository(IGeoLayerRepository):
         self.data_dir = data_dir
         self.logger = logger
         self._ttl_s = ttl_s
-        self._cache: dict[tuple[LayerType, int], _CacheEntry] = {}
-        self._locks: dict[tuple[LayerType, int], asyncio.Lock] = {}
+        self._cache: dict[_CacheKey, _CacheEntry] = {}
+        self._locks: dict[_CacheKey, asyncio.Lock] = {}
         self._eviction_task: asyncio.Task | None = None
 
-    def _get_lock(self, key: tuple[LayerType, int]) -> asyncio.Lock:
+    def _get_lock(self, key: _CacheKey) -> asyncio.Lock:
         if key not in self._locks:
             self._locks[key] = asyncio.Lock()
         return self._locks[key]
 
-    async def get_layer(self, layer: LayerType, detail_level: int) -> gpd.GeoDataFrame:
+    async def get_country_layer(self, detail_level: int) -> gpd.GeoDataFrame:
+        """Return the GeoDataFrame for the country layer at the given detail level."""
+        return await self._get_layer(LayerType.COUNTRY, detail_level)
+
+    async def get_departments_layer(self) -> gpd.GeoDataFrame:
+        """Return the GeoDataFrame for the departments layer."""
+        return await self._get_layer(LayerType.DEPARTMENTS)
+
+    async def _get_layer(
+        self, layer: LayerType, detail_level: int | None = None
+    ) -> gpd.GeoDataFrame:
         """Return the GeoDataFrame for the given layer and detail level."""
         key = (layer, detail_level)
         path = _simplified_stem(self.data_dir, _SIMPLIFIED_STEMS[layer], detail_level)

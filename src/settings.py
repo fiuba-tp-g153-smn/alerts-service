@@ -25,6 +25,7 @@ class Settings:  # pylint: disable=too-many-instance-attributes,too-few-public-m
     # Settings file
     settings_file: str = "settings.json"
     detail_levels: dict = {}
+    departments_detail_level: float = 0.005
 
     # Geospatial
     data_dir: str = "/app/data"
@@ -79,6 +80,7 @@ class Settings:  # pylint: disable=too-many-instance-attributes,too-few-public-m
         self.layer_cache_ttl_minutes: int = int(data.get("layer_cache_ttl_minutes", 30))
         raw = data.get("detail_levels", {})
         self.detail_levels = {int(k): float(v) for k, v in raw.items()}
+        self.departments_detail_level = float(data.get("departments_detail_level", 0.005))
         self.alert_detail_level = int(data.get("alert_detail_level", 7))
 
     def _load_from_env(self) -> None:
@@ -144,6 +146,7 @@ class Settings:  # pylint: disable=too-many-instance-attributes,too-few-public-m
         for level, tolerance in self.detail_levels.items():
             logger.info("DETAIL_LEVEL_%s: %s", level, tolerance)
 
+        logger.info("DEPARTMENTS_DETAIL_LEVEL_TOLERANCE: %s", self.departments_detail_level)
         logger.info("ALERT_DETAIL_LEVEL: %s", self.alert_detail_level)
         logger.info("MYSQL_TAVISO_HOST: %s", self.mysql_taviso_host)
         logger.info("MYSQL_TAVISO_DATABASE: %s", self.mysql_taviso_database)

@@ -16,6 +16,7 @@ def mock_settings(tmp_path):
     settings = MagicMock()
     settings.data_dir = str(tmp_path)
     settings.detail_levels = _TEST_LEVELS
+    settings.departments_detail_level = 0.005
     settings.country_geojson_url = "http://example.com/country.geojson"
     settings.departments_geojson_url = "http://example.com/departments.geojson"
     return settings
@@ -61,7 +62,7 @@ async def test_run_success_returns_success_result(service, tmp_raw_files):
     assert isinstance(result.files, list)
     assert len(result.files) == 2
     assert any("pais_simple_L" in f and "_T" in f for f in result.files)
-    assert any("departamentos_simple_L" in f and "_T" in f for f in result.files)
+    assert any("departamentos_simple_T" in f for f in result.files)
     assert result.error is None
 
 
@@ -125,7 +126,7 @@ async def test_run_success_calls_simplify_with_configured_tolerances(
     await service.run()
 
     tolerance_values = {call.args[2] for call in mock_processor.simplify.call_args_list}
-    assert tolerance_values == {0.001, 0.05}
+    assert tolerance_values == {0.001, 0.05, mock_settings.departments_detail_level}
 
     out_paths = [call.args[1] for call in mock_processor.simplify.call_args_list]
     assert any("_T0p001_" in p for p in out_paths)

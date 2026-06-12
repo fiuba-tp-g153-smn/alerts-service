@@ -55,16 +55,21 @@ class GeoLayerSyncService:  # pylint: disable=too-few-public-methods
         self.storage = storage
         self.processor = processor
         self.logger = logger
-        self._needs_regen: list[tuple[dict, list[tuple[int, float]]]] = []
+        self._needs_regen: list[tuple[dict, list[tuple[int | None, float]]]] = []
 
-    async def ensure_all(self) -> list[tuple[dict, list[tuple[int, float]]]]:
+    def _levels_for(self, layer: dict) -> dict[int | None, float]:
+        """Return the {level: tolerance} map to reconcile/generate for the given layer."""
+        if layer["simplified_stem"] == "departamentos_simple":
+            return {None: self.settings.departments_detail_level}
+        return self.settings.detail_levels
+
+    async def ensure_all(self) -> list[tuple[dict, list[tuple[int | None, float]]]]:
         """Reconcile all layers. Returns list of (layer_info, missing_levels)."""
-        levels: dict[int, float] = self.settings.detail_levels
         needs_regen = []
 
         for layer in LAYERS:
-            missing_levels: list[tuple[int, float]] = []
-            for level, tolerance in levels.items():
+            missing_levels: list[tuple[int | None, float]] = []
+            for level, tolerance in self._levels_for(layer).items():
                 if not await self._reconcile_simplified(layer, level, tolerance):
                     missing_levels.append((level, tolerance))
 
@@ -87,7 +92,11 @@ class GeoLayerSyncService:  # pylint: disable=too-few-public-methods
                 await self.processor.download(url, raw_tmp)
 
                 for level, tolerance in missing_levels:
-                    stem = f"{layer['simplified_stem']}_L{level}"
+                    stem = (
+                        layer["simplified_stem"]
+                        if level is None
+                        else f"{layer['simplified_stem']}_L{level}"
+                    )
                     versioned = IGeoLayerProcessor.tolerance_versioned_key(
                         f"{stem}.geojson", tolerance
                     )
@@ -103,14 +112,18 @@ class GeoLayerSyncService:  # pylint: disable=too-few-public-methods
         self.logger.info("All geo layers are ready.")
 
     async def _reconcile_simplified(
-        self, layer: dict, level: int, tolerance: float
+        self, layer: dict, level: int | None, tolerance: float
     ) -> bool:
         """Ensure the canonical simplified file for (layer, level, tolerance) exists.
 
         Purges any local/S3 files for this layer+level with the wrong tolerance or
         a non-canonical date. Returns False if re-generation is needed.
         """
-        stem = f"{layer['simplified_stem']}_L{level}"
+        stem = (
+            layer["simplified_stem"]
+            if level is None
+            else f"{layer['simplified_stem']}_L{level}"
+        )
         tol_str = IGeoLayerProcessor.tolerance_str(tolerance)
 
         # Correct-tolerance files (to find canonical date)

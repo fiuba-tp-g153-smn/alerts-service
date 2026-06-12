@@ -31,13 +31,19 @@ class LayerRefreshService:  # pylint: disable=too-few-public-methods
         self.logger = logger
 
     def _simplified_fnames(self) -> list[str]:
-        """Return simplified GeoJSON filenames (with tolerance) for all configured levels."""
+        """Return simplified GeoJSON filenames (with tolerance) for all configured layers."""
+        return self._country_fnames() + self._departments_fnames()
+
+    def _country_fnames(self) -> list[str]:
         fnames = []
         for level, tolerance in self.settings.detail_levels.items():
             tol = IGeoLayerProcessor.tolerance_str(tolerance)
             fnames.append(f"pais_simple_L{level}_T{tol}.geojson")
-            fnames.append(f"departamentos_simple_L{level}_T{tol}.geojson")
         return fnames
+
+    def _departments_fnames(self) -> list[str]:
+        tol = IGeoLayerProcessor.tolerance_str(self.settings.departments_detail_level)
+        return [f"departamentos_simple_T{tol}.geojson"]
 
     async def _upload_files(self, data_dir: str) -> list[str]:
         """Delete old S3 keys for each level and upload the current versioned files."""
@@ -64,19 +70,27 @@ class LayerRefreshService:  # pylint: disable=too-few-public-methods
 
     async def _simplify_layers(self, country_tmp: str, deptos_tmp: str) -> None:
         self.logger.info("Simplifying layers ...")
+        await self._simplify_country(country_tmp)
+        await self._simplify_departments(deptos_tmp)
+
+    async def _simplify_country(self, country_tmp: str) -> None:
         data_dir = self.settings.data_dir
         for level, tolerance in self.settings.detail_levels.items():
-            for stem, tmp in [
-                ("pais_simple", country_tmp),
-                ("departamentos_simple", deptos_tmp),
-            ]:
-                out = os.path.join(
-                    data_dir,
-                    IGeoLayerProcessor.tolerance_versioned_key(
-                        f"{stem}_L{level}.geojson", tolerance
-                    ),
-                )
-                await self.processor.simplify(tmp, out, tolerance)
+            out = os.path.join(
+                data_dir,
+                IGeoLayerProcessor.tolerance_versioned_key(
+                    f"pais_simple_L{level}.geojson", tolerance
+                ),
+            )
+            await self.processor.simplify(country_tmp, out, tolerance)
+
+    async def _simplify_departments(self, deptos_tmp: str) -> None:
+        tolerance = self.settings.departments_detail_level
+        out = os.path.join(
+            self.settings.data_dir,
+            IGeoLayerProcessor.tolerance_versioned_key("departamentos_simple.geojson", tolerance),
+        )
+        await self.processor.simplify(deptos_tmp, out, tolerance)
 
     def _cleanup_tmp(self, country_tmp: str, deptos_tmp: str) -> None:
         self.logger.info("Removing temporary raw files ...")

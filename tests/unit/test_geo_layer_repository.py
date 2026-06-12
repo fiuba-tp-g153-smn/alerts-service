@@ -1,6 +1,6 @@
 import asyncio
 import time
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import geopandas as gpd
 import pytest
@@ -40,7 +40,7 @@ async def test_get_layer_raises_file_not_found_when_no_files(tmp_path):
     repo = FileSystemGeoLayerRepository(str(tmp_path), logger)
 
     with pytest.raises(FileNotFoundError):
-        await repo.get_layer(LayerType.COUNTRY, 1)
+        await repo.get_country_layer(1)
 
 
 @pytest.mark.asyncio
@@ -55,11 +55,11 @@ async def test_get_layer_caches_result(mock_read_file, tmp_path):
     mock_gdf.__len__.return_value = 1
     mock_read_file.return_value = mock_gdf
 
-    result1 = await repo.get_layer(LayerType.COUNTRY, 1)
+    result1 = await repo.get_country_layer(1)
     mock_read_file.assert_called_once()
     assert result1 is mock_gdf
 
-    result2 = await repo.get_layer(LayerType.COUNTRY, 1)
+    result2 = await repo.get_country_layer(1)
     assert mock_read_file.call_count == 1  # cache hit
     assert result2 is mock_gdf
 
@@ -80,14 +80,14 @@ async def test_get_layer_cache_invalidates_when_new_versioned_file_appears(
     mock_gdf2.__len__.return_value = 2
     mock_read_file.side_effect = [mock_gdf1, mock_gdf2]
 
-    result1 = await repo.get_layer(LayerType.COUNTRY, 1)
+    result1 = await repo.get_country_layer(1)
     assert result1 is mock_gdf1
     assert mock_read_file.call_count == 1
 
     # New versioned file appears — cache should miss on next call
     (tmp_path / "pais_simple_L1_T0p0001_20240201.geojson").touch()
 
-    result2 = await repo.get_layer(LayerType.COUNTRY, 1)
+    result2 = await repo.get_country_layer(1)
     assert result2 is mock_gdf2
     assert mock_read_file.call_count == 2
 
@@ -107,8 +107,8 @@ async def test_get_layer_different_levels_cached_independently(
     mock_gdf.__len__.return_value = 1
     mock_read_file.return_value = mock_gdf
 
-    await repo.get_layer(LayerType.COUNTRY, 1)
-    await repo.get_layer(LayerType.COUNTRY, 2)
+    await repo.get_country_layer(1)
+    await repo.get_country_layer(2)
 
     assert mock_read_file.call_count == 2
 
@@ -125,7 +125,7 @@ async def test_ttl_eviction_removes_idle_entry(mock_read_file, tmp_path):
     mock_gdf.__len__.return_value = 1
     mock_read_file.return_value = mock_gdf
 
-    await repo.get_layer(LayerType.COUNTRY, 1)
+    await repo.get_country_layer(1)
     assert (LayerType.COUNTRY, 1) in repo._cache
 
     # Backdate last_used so the entry appears idle
@@ -148,7 +148,7 @@ async def test_ttl_eviction_keeps_recently_used_entry(mock_read_file, tmp_path):
     mock_gdf.__len__.return_value = 1
     mock_read_file.return_value = mock_gdf
 
-    await repo.get_layer(LayerType.COUNTRY, 1)
+    await repo.get_country_layer(1)
     await repo._evict_expired()
 
     assert (LayerType.COUNTRY, 1) in repo._cache
@@ -175,9 +175,9 @@ async def test_stampede_protection_reads_file_once_for_concurrent_requests(
     mock_read_file.side_effect = slow_read
 
     results = await asyncio.gather(
-        repo.get_layer(LayerType.COUNTRY, 1),
-        repo.get_layer(LayerType.COUNTRY, 1),
-        repo.get_layer(LayerType.COUNTRY, 1),
+        repo.get_country_layer(1),
+        repo.get_country_layer(1),
+        repo.get_country_layer(1),
     )
 
     assert mock_read_file.call_count == 1

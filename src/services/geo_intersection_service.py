@@ -6,7 +6,6 @@ from logging import Logger
 
 from shapely.geometry import shape
 
-from domain.models import LayerType
 from geo_utils import build_department_features
 from ports.geo_repository import IGeoLayerRepository
 
@@ -28,7 +27,7 @@ class GeoIntersectionService:
         input_geom = shape(geometry_dict)
 
         t0 = time.perf_counter()
-        gdf = await self.repo.get_layer(LayerType.COUNTRY, detail_level)
+        gdf = await self.repo.get_country_layer(detail_level)
         self.logger.info(f"intersect_country: load={time.perf_counter()-t0:.3f}s")
 
         t0 = time.perf_counter()
@@ -43,14 +42,12 @@ class GeoIntersectionService:
         )
         return result
 
-    async def intersect_departments(
-        self, geometry_dict: dict, detail_level: int
-    ) -> list[dict]:
+    async def intersect_departments(self, geometry_dict: dict) -> list[dict]:
         """Return departments intersecting the input geometry with their intersection shapes."""
         input_geom = shape(geometry_dict)
 
         t0 = time.perf_counter()
-        gdf = await self.repo.get_layer(LayerType.DEPARTMENTS, detail_level)
+        gdf = await self.repo.get_departments_layer()
         self.logger.info(f"intersect_departments: load={time.perf_counter()-t0:.3f}s")
 
         t0 = time.perf_counter()
@@ -62,8 +59,5 @@ class GeoIntersectionService:
 
         t0 = time.perf_counter()
         features = build_department_features(intersecting)
-        self.logger.info(
-            f"intersect_departments: serialize={time.perf_counter()-t0:.3f}s"
-            f" (detail_level={detail_level})"
-        )
+        self.logger.info(f"intersect_departments: serialize={time.perf_counter()-t0:.3f}s")
         return features

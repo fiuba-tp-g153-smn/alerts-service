@@ -220,49 +220,14 @@ def test_intersect_departments_200(app_client, mock_service):
     assert body["departments"][0]["properties"]["nombre"] == "Dep1"
 
 
-def test_intersect_departments_default_level_is_five(app_client, mock_service):
-    mock_service.intersect_departments.return_value = []
-
-    app_client.post("/intersect/departments", json=_VALID_POLYGON)
-
-    assert mock_service.intersect_departments.call_args.args[1] == 5
-
-
-def test_intersect_departments_level_param_forwarded_to_service(
+def test_intersect_departments_calls_service_with_geometry_only(
     app_client, mock_service
 ):
     mock_service.intersect_departments.return_value = []
 
-    app_client.post("/intersect/departments?detail_level=3", json=_VALID_POLYGON)
+    app_client.post("/intersect/departments", json=_VALID_POLYGON)
 
-    assert mock_service.intersect_departments.call_args.args[1] == 3
-
-
-def test_intersect_departments_detail_level_5_accepted(app_client, mock_service):
-    mock_service.intersect_departments.return_value = []
-
-    response = app_client.post(
-        "/intersect/departments?detail_level=5", json=_VALID_POLYGON
-    )
-
-    assert response.status_code == 200
-    assert mock_service.intersect_departments.call_args.args[1] == 5
-
-
-def test_intersect_departments_detail_level_6_returns_422(app_client):
-    response = app_client.post(
-        "/intersect/departments?detail_level=6", json=_VALID_POLYGON
-    )
-
-    assert response.status_code == 422
-
-
-def test_intersect_departments_detail_level_0_returns_422(app_client):
-    response = app_client.post(
-        "/intersect/departments?detail_level=0", json=_VALID_POLYGON
-    )
-
-    assert response.status_code == 422
+    mock_service.intersect_departments.assert_called_once_with(_VALID_POLYGON)
 
 
 def test_intersect_departments_layer_not_found_500(app_client, mock_service):

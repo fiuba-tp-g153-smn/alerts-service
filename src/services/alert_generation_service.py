@@ -82,9 +82,7 @@ class AlertGenerationService:  # pylint: disable=too-few-public-methods
 
         # 2. Calculate intersection with departments (reuse existing service)
         self.logger.info(f"Calculating intersections for phenomenon {phenomenon_code}")
-        departments = await self.geo_service.intersect_departments(
-            geometry, detail_level=self.settings.alert_detail_level
-        )
+        departments = await self.geo_service.intersect_departments(geometry)
 
         # 3. Filter departments spatially
         all_departments = self.mysql_repo.get_departments()

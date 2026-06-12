@@ -67,12 +67,6 @@ async def intersect_country(
 )
 async def intersect_departments(
     geojson: GeoJSONInput,
-    detail_level: int = Query(
-        5,
-        ge=1,
-        le=5,
-        description="Detail level (1–5); higher means more detail (less tolerance)",
-    ),
     service: GeoIntersectionService = Depends(get_intersection_service),
     logger=Depends(get_logger),
 ):
@@ -87,15 +81,11 @@ async def intersect_departments(
     start_time = time.perf_counter()
     try:
         geometry = geojson.extract_geometry()
-        logger.info(
-            f"intersect_departments: processing (detail_level={detail_level},"
-            f" type={geometry.get('type')})"
-        )
-        features = await service.intersect_departments(geometry, detail_level)
+        logger.info(f"intersect_departments: processing (type={geometry.get('type')})")
+        features = await service.intersect_departments(geometry)
         elapsed = time.perf_counter() - start_time
         logger.info(
-            f"intersect_departments: done (detail_level={detail_level})"
-            f" in {elapsed:.3f}s, {len(features)} departments"
+            f"intersect_departments: done in {elapsed:.3f}s, {len(features)} departments"
         )
         return {"departments": features}
     except FileNotFoundError as e:

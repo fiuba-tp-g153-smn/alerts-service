@@ -1,6 +1,5 @@
 """Tests for GeoLayerSyncService — local ↔ S3 consistency and stale file cleanup."""
 
-import os
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
@@ -17,6 +16,7 @@ def mock_settings(tmp_path):
     settings.data_dir = str(tmp_path)
     settings.s3_bucket_name = "test-bucket"
     settings.detail_levels = {1: 0.001, 2: 0.01}
+    settings.departments_detail_level = 0.005
     return settings
 
 
@@ -51,9 +51,7 @@ async def test_ensure_all_returns_empty_when_all_files_present(
 ):
     for level, tol_str in [(1, "0p001"), (2, "0p01")]:
         (tmp_path / f"pais_simple_L{level}_T{tol_str}_20260322.geojson").touch()
-        (
-            tmp_path / f"departamentos_simple_L{level}_T{tol_str}_20260322.geojson"
-        ).touch()
+    (tmp_path / "departamentos_simple_T0p005_20260322.geojson").touch()
 
     result = await service.ensure_all()
 
@@ -63,12 +61,15 @@ async def test_ensure_all_returns_empty_when_all_files_present(
 async def test_ensure_all_returns_layer_when_simplified_missing(
     service, mock_settings, tmp_path
 ):
-    # Nothing present locally — both levels missing for both layers
+    # Nothing present locally — both layers missing all their levels
     result = await service.ensure_all()
 
     assert len(result) == 2
-    for _layer, missing_levels in result:
-        assert len(missing_levels) == 2  # both levels missing
+    for layer, missing_levels in result:
+        if layer["simplified_stem"] == "departamentos_simple":
+            assert len(missing_levels) == 1  # single department level
+        else:
+            assert len(missing_levels) == 2  # both country levels missing
 
 
 # ── stale file cleanup ────────────────────────────────────────────────────────
