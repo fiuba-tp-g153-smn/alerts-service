@@ -23,13 +23,13 @@ def service():
     mysql_repo.get_phenomenon_text.return_value = "TORMENTAS FUERTES"
     mysql_repo.insert_alert.return_value = 42
     mysql_repo.get_departments.return_value = []
+    mysql_repo.get_polygon_max_length.return_value = 4000
 
     geo_service = MagicMock()
     geo_service.intersect_departments = AsyncMock(return_value=[])
 
     settings = MagicMock()
     settings.alert_simplification_level = 5
-    settings.polygon_db_max_chars = 4000
 
     svc = AlertGenerationService(mysql_repo, geo_service, settings, MagicMock())
     svc._filter_departments_by_departments = AsyncMock(return_value=AFFECTED_DEPARTMENTS)
