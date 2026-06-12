@@ -56,10 +56,10 @@ class FileSystemGeoLayerRepository(IGeoLayerRepository):
             self._locks[key] = asyncio.Lock()
         return self._locks[key]
 
-    async def get_layer(self, layer: LayerType, level: int) -> gpd.GeoDataFrame:
-        """Return the GeoDataFrame for the given layer and simplification level."""
-        key = (layer, level)
-        path = _simplified_stem(self.data_dir, _SIMPLIFIED_STEMS[layer], level)
+    async def get_layer(self, layer: LayerType, detail_level: int) -> gpd.GeoDataFrame:
+        """Return the GeoDataFrame for the given layer and detail level."""
+        key = (layer, detail_level)
+        path = _simplified_stem(self.data_dir, _SIMPLIFIED_STEMS[layer], detail_level)
 
         # Fast path — no lock needed; dict reads are atomic in CPython event loop
         entry = self._cache.get(key)

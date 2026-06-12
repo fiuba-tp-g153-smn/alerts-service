@@ -24,7 +24,7 @@ class Settings:  # pylint: disable=too-many-instance-attributes,too-few-public-m
 
     # Settings file
     settings_file: str = "settings.json"
-    simplification_levels: dict = {}
+    detail_levels: dict = {}
 
     # Geospatial
     data_dir: str = "/app/data"
@@ -61,7 +61,7 @@ class Settings:  # pylint: disable=too-many-instance-attributes,too-few-public-m
     # Alert Generation
     output_dir: str = ""
     alert_cache_dir: str = ""
-    alert_simplification_level: int = 4
+    alert_detail_level: int = 7
 
     def __init__(self):
         self._load_from_env()
@@ -77,9 +77,9 @@ class Settings:  # pylint: disable=too-many-instance-attributes,too-few-public-m
             ) from exc
         self.layer_update_cron = data.get("layer_update_cron", "0 3 * * 0")
         self.layer_cache_ttl_minutes: int = int(data.get("layer_cache_ttl_minutes", 30))
-        raw = data.get("simplification_levels", {})
-        self.simplification_levels = {int(k): float(v) for k, v in raw.items()}
-        self.alert_simplification_level = int(data.get("alert_simplification_level", 4))
+        raw = data.get("detail_levels", {})
+        self.detail_levels = {int(k): float(v) for k, v in raw.items()}
+        self.alert_detail_level = int(data.get("alert_detail_level", 7))
 
     def _load_from_env(self) -> None:
         self.log_level = os.getenv("LOG_LEVEL", self.log_level)
@@ -141,10 +141,10 @@ class Settings:  # pylint: disable=too-many-instance-attributes,too-few-public-m
         logger.info("LAYER_UPDATE_CRON: %s", self.layer_update_cron)
         logger.info("LAYER_CACHE_TTL_MINUTES: %s", self.layer_cache_ttl_minutes)
 
-        for level, tolerance in self.simplification_levels.items():
-            logger.info("SIMPLIFICATION_LEVEL_%s: %s", level, tolerance)
+        for level, tolerance in self.detail_levels.items():
+            logger.info("DETAIL_LEVEL_%s: %s", level, tolerance)
 
-        logger.info("ALERT_SIMPLIFICATION_LEVEL: %s", self.alert_simplification_level)
+        logger.info("ALERT_DETAIL_LEVEL: %s", self.alert_detail_level)
         logger.info("MYSQL_TAVISO_HOST: %s", self.mysql_taviso_host)
         logger.info("MYSQL_TAVISO_DATABASE: %s", self.mysql_taviso_database)
         logger.info("S3_ENDPOINT: %s", self.s3_endpoint)

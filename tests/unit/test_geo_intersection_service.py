@@ -63,7 +63,7 @@ async def test_intersect_country_simplified_returns_feature_collection(
 ):
     mock_repo.get_layer.return_value = country_gdf
 
-    result = await service.intersect_country(test_geometry, simplification_level=1)
+    result = await service.intersect_country(test_geometry, detail_level=1)
 
     mock_repo.get_layer.assert_called_once_with(LayerType.COUNTRY, 1)
     assert result["type"] == "FeatureCollection"
@@ -80,7 +80,7 @@ async def test_intersect_country_simplified_passes_correct_level_to_repo(
 ):
     mock_repo.get_layer.return_value = country_gdf
 
-    await service.intersect_country(test_geometry, simplification_level=3)
+    await service.intersect_country(test_geometry, detail_level=3)
 
     call_args = mock_repo.get_layer.call_args
     assert call_args.args == (LayerType.COUNTRY, 3)
@@ -104,7 +104,7 @@ async def test_intersect_country_simplified_no_intersection(service, mock_repo):
         ],
     }
 
-    result = await service.intersect_country(test_geom, simplification_level=1)
+    result = await service.intersect_country(test_geom, detail_level=1)
 
     assert result["features"] == []
 
@@ -114,7 +114,7 @@ async def test_intersect_departments_simplified_filters_correctly(
 ):
     mock_repo.get_layer.return_value = deptos_gdf
 
-    result = await service.intersect_departments(test_geometry, simplification_level=1)
+    result = await service.intersect_departments(test_geometry, detail_level=1)
 
     mock_repo.get_layer.assert_called_once_with(LayerType.DEPARTMENTS, 1)
     assert len(result) == 1
@@ -141,7 +141,7 @@ async def test_intersect_departments_simplified_returns_correct_structure_for_ea
     }
     mock_repo.get_layer.return_value = deptos_gdf
 
-    result = await service.intersect_departments(wide_geometry, simplification_level=1)
+    result = await service.intersect_departments(wide_geometry, detail_level=1)
 
     assert len(result) == 2
     for feature in result:
@@ -175,7 +175,7 @@ async def test_intersect_departments_simplified_no_match(service, mock_repo):
         ],
     }
 
-    result = await service.intersect_departments(test_geom, simplification_level=1)
+    result = await service.intersect_departments(test_geom, detail_level=1)
 
     assert result == []
 
@@ -183,4 +183,4 @@ async def test_intersect_departments_simplified_no_match(service, mock_repo):
 async def test_intersect_country_invalid_geometry_raises(service, mock_repo):
     invalid_geometry = {"type": "Invalid", "coordinates": []}
     with pytest.raises(Exception):
-        await service.intersect_country(invalid_geometry, simplification_level=1)
+        await service.intersect_country(invalid_geometry, detail_level=1)

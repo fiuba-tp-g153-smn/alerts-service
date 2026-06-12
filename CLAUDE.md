@@ -16,8 +16,8 @@ make precommit   # Pre-commit hooks (pylint, mypy, black)
 make local       # Run without Docker
 
 # Single test file/function:
-docker compose -f docker-compose.yaml run --rm app poetry run pytest tests/unit/test_geo_utils.py -v
-docker compose -f docker-compose.yaml run --rm app poetry run pytest tests/unit/test_geo_utils.py::test_function_name -v
+docker compose -f docker-compose.yaml run --rm alerts-service poetry run pytest tests/unit/test_geo_utils.py -v
+docker compose -f docker-compose.yaml run --rm alerts-service poetry run pytest tests/unit/test_geo_utils.py::test_function_name -v
 ```
 
 ## Architecture
@@ -27,24 +27,22 @@ FastAPI geospatial intersection service (Python). Given a GeoJSON polygon, compu
 ### Request Flow
 
 ```
-POST /intersect/country or /intersect/departments
+POST /intersect/country or /intersect/departments  (detail_level 1-5)
   → Controller (controller/intersections.py)
   → GeoIntersectionService (services/geo_intersection_service.py)
-      ├─ simplified=true:  cached GeoDataFrame → shapely intersection → GeoJSON
-      └─ simplified=false: subprocess (fullres_worker.py) → geometry via stdin → stdout
+      └─ cached GeoDataFrame (per detail_level) → shapely intersection → GeoJSON
   → FileSystemGeoLayerRepository (adapters/geo_layer_repository.py) provides layer data
 ```
 
 ### Startup & Background Jobs
 
-On startup (`main.py` lifespan), the scheduler (`scheduler/__init__.py`) runs S3 reconciliation: compares local `data/` files against S3 by date-stamp, downloads missing layers or re-generates from IGN. APScheduler cron (default: weekly Sunday 3 AM UTC) refreshes layers — download → simplify → convert to FlatGeobuf → upload to S3. History saved to `data/history.db` (SQLite).
+On startup (`main.py` lifespan), the scheduler (`scheduler/__init__.py`) runs S3 reconciliation: compares local `data/` files against S3 by date-stamp, downloads missing layers or re-generates from IGN. APScheduler cron (default: weekly Sunday 3 AM UTC) refreshes layers — download → simplify (one GeoJSON per detail_level) → upload to S3. History saved to `data/history.db` (SQLite).
 
 ### Key Design Decisions
 
 - **Hexagonal architecture**: interfaces in `ports/`, implementations in `adapters/`, business logic in `services/`.
-- **Subprocess isolation for full-res**: `fullres_worker.py` runs in a separate process to prevent glibc arena memory bloat from GeoPandas. Module-level semaphore (`_FULLRES_SEMAPHORE`) serializes launches to cap RAM peaks.
-- **Dual format**: simplified layers as GeoJSON (fast loads, in-memory cache); full-res as FlatGeobuf (`.fgb`) for spatial queries.
-- **Versioned files**: date-stamped layers (e.g., `pais_simple_20260314.geojson`); glob patterns locate the latest version.
+- **Pre-simplified layers**: each `detail_level` (1-5, plus internal 7 for alerts) is a date-stamped GeoJSON simplified at a fixed tolerance, loaded into an in-memory GeoDataFrame cache. Higher `detail_level` = more detail (lower tolerance).
+- **Versioned files**: date-stamped per-level layers (e.g., `pais_simple_L5_T0p01_20260314.geojson`); glob patterns locate the latest version.
 - **DI via container**: `container.py` provides singletons and per-request services via FastAPI `Depends`.
 
 ### Key Source Files
@@ -52,13 +50,12 @@ On startup (`main.py` lifespan), the scheduler (`scheduler/__init__.py`) runs S3
 | File | Role |
 |---|---|
 | `src/main.py` | App entry, lifespan, router registration |
-| `src/services/geo_intersection_service.py` | Core intersection logic (simplified + full-res paths) |
-| `src/fullres_worker.py` | Subprocess: reads geometry JSON from stdin, writes result to stdout |
+| `src/services/geo_intersection_service.py` | Core intersection logic (per detail_level) |
 | `src/adapters/geo_layer_repository.py` | Loads/caches versioned GeoJSON from `data/` |
 | `src/adapters/sqlite_history.py` | SQLite persistence for layer refresh history |
 | `src/adapters/s3_storage.py` | S3 backup/restore for layer files |
 | `src/scheduler/__init__.py` | S3 reconciliation + APScheduler cron registration |
-| `src/services/layer_refresh_service.py` | Download → simplify → FlatGeobuf pipeline |
+| `src/services/layer_refresh_service.py` | Download → simplify (per detail_level) pipeline |
 | `src/container.py` | FastAPI dependency injection wiring |
 
 ## Configuration
@@ -68,7 +65,8 @@ Copy `.env.example` to `.env`. Key variables:
 | Variable | Default | Notes |
 |---|---|---|
 | `APP_ENV` | `development` | `production` enables NewRelic JSON logging |
-| `SIMPLIFY_TOLERANCE` | `0.01` | Geometry simplification (0.001–0.1) |
+| `detail_levels` (settings.json) | see file | Per-level simplify tolerance; API exposes 1-5, level 7 is internal (alerts) |
+| `alert_detail_level` (settings.json) | `7` | detail_level used for alert generation (internal, not API-selectable) |
 | `layer_update_cron` (settings.json) | `0 3 * * 0` | Cron for layer refresh |
 | `S3_ENDPOINT` / `S3_BUCKET_NAME` | (empty) | Required for S3 backup |
 | `COUNTRY_GEOJSON_URL` / `DEPARTMENTS_GEOJSON_URL` | IGN WFS URLs | Override data source |
@@ -116,11 +114,10 @@ SIFER principles: **S**imple, **I**solated, **F**ast, **E**xplicit, **R**epresen
 
 ### Memory (Critical — GeoPandas/Shapely)
 
-- **Full-res subprocess isolation is load-bearing** — GeoPandas causes glibc arena memory bloat. Never move full-res processing back into the main process.
-- Semaphore (`_FULLRES_SEMAPHORE`) serializes subprocess launches — respect this to cap RAM peaks.
+- **Subprocess isolation for heavy GeoPandas is load-bearing** — GeoPandas causes glibc arena memory bloat. Keep heavy ops (layer simplification in `geo_processing_worker.py`, alert rendering in `alert_generation_worker.py`) in subprocesses; never move them into the main process.
 - Stream large files (generators / async iteration); context managers for all cleanup.
 - Bounded buffers: `asyncio.Queue(maxsize=N)` where applicable.
-- In-memory GeoDataFrame cache is for simplified layers only — never cache full-res data in the main process.
+- The in-memory GeoDataFrame cache holds only the pre-simplified per-level layers; raw full-resolution geometry is never loaded in the main process.
 
 ### Concurrency
 

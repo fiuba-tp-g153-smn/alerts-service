@@ -59,7 +59,7 @@ class GeoLayerSyncService:  # pylint: disable=too-few-public-methods
 
     async def ensure_all(self) -> list[tuple[dict, list[tuple[int, float]]]]:
         """Reconcile all layers. Returns list of (layer_info, missing_levels)."""
-        levels: dict[int, float] = self.settings.simplification_levels
+        levels: dict[int, float] = self.settings.detail_levels
         needs_regen = []
 
         for layer in LAYERS:

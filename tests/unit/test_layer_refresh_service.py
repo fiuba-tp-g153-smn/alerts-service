@@ -15,7 +15,7 @@ _TEST_LEVELS = {1: 0.001}  # 1 level → 2 simplified files total (pais + depart
 def mock_settings(tmp_path):
     settings = MagicMock()
     settings.data_dir = str(tmp_path)
-    settings.simplification_levels = _TEST_LEVELS
+    settings.detail_levels = _TEST_LEVELS
     settings.country_geojson_url = "http://example.com/country.geojson"
     settings.departments_geojson_url = "http://example.com/departments.geojson"
     return settings
@@ -120,7 +120,7 @@ async def test_run_success_calls_download_with_correct_urls(
 async def test_run_success_calls_simplify_with_configured_tolerances(
     service, mock_settings, mock_processor, tmp_raw_files
 ):
-    mock_settings.simplification_levels = {1: 0.001, 2: 0.05}
+    mock_settings.detail_levels = {1: 0.001, 2: 0.05}
 
     await service.run()
 

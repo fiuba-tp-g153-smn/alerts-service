@@ -16,7 +16,7 @@ def mock_settings(tmp_path):
     settings = MagicMock()
     settings.data_dir = str(tmp_path)
     settings.s3_bucket_name = "test-bucket"
-    settings.simplification_levels = {1: 0.001, 2: 0.01}
+    settings.detail_levels = {1: 0.001, 2: 0.01}
     return settings
 
 

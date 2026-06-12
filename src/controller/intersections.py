@@ -20,11 +20,11 @@ router = APIRouter(prefix="/intersect", tags=["Geo Intersection"])
 )
 async def intersect_country(
     geojson: GeoJSONInput,
-    simplification_level: int = Query(
-        1,
+    detail_level: int = Query(
+        5,
         ge=1,
-        le=10,
-        description="Simplified layer level (1-10) with increasing result tolerance",
+        le=5,
+        description="Detail level (1-5); higher means more detail (less tolerance)",
     ),
     service: GeoIntersectionService = Depends(get_intersection_service),
     logger=Depends(get_logger),
@@ -39,13 +39,13 @@ async def intersect_country(
     try:
         geometry = geojson.extract_geometry()
         logger.info(
-            f"intersect_country: processing (simplification_level={simplification_level},"
+            f"intersect_country: processing (detail_level={detail_level},"
             f" type={geometry.get('type')})"
         )
-        result = await service.intersect_country(geometry, simplification_level)
+        result = await service.intersect_country(geometry, detail_level)
         elapsed = time.perf_counter() - start_time
         logger.info(
-            f"intersect_country: done (simplification_level={simplification_level})"
+            f"intersect_country: done (detail_level={detail_level})"
             f" in {elapsed:.3f}s"
         )
         return JSONResponse(content=result)
@@ -67,11 +67,11 @@ async def intersect_country(
 )
 async def intersect_departments(
     geojson: GeoJSONInput,
-    simplification_level: int = Query(
-        1,
+    detail_level: int = Query(
+        5,
         ge=1,
-        le=10,
-        description="Simplified layer level (1–10) with increasing result tolerance",
+        le=5,
+        description="Detail level (1–5); higher means more detail (less tolerance)",
     ),
     service: GeoIntersectionService = Depends(get_intersection_service),
     logger=Depends(get_logger),
@@ -88,13 +88,13 @@ async def intersect_departments(
     try:
         geometry = geojson.extract_geometry()
         logger.info(
-            f"intersect_departments: processing (simplification_level={simplification_level},"
+            f"intersect_departments: processing (detail_level={detail_level},"
             f" type={geometry.get('type')})"
         )
-        features = await service.intersect_departments(geometry, simplification_level)
+        features = await service.intersect_departments(geometry, detail_level)
         elapsed = time.perf_counter() - start_time
         logger.info(
-            f"intersect_departments: done (simplification_level={simplification_level})"
+            f"intersect_departments: done (detail_level={detail_level})"
             f" in {elapsed:.3f}s, {len(features)} departments"
         )
         return {"departments": features}

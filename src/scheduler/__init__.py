@@ -61,12 +61,14 @@ async def _ensure_alert_layers(
 ) -> None:
     """Ensure alert-specific layers are present locally (simplified GeoJSON only)."""
     data_dir = settings.data_dir
-    level = settings.alert_simplification_level
-    tolerance = settings.simplification_levels.get(level, 0.005)
+    detail_level = settings.alert_detail_level
+    tolerance = settings.detail_levels.get(detail_level, 0.005)
 
     def _local_date(stem: str) -> str | None:
         matches = sorted(
-            glob.glob(os.path.join(data_dir, f"{stem}_L{level}_T*_????????.geojson"))
+            glob.glob(
+                os.path.join(data_dir, f"{stem}_L{detail_level}_T*_????????.geojson")
+            )
         )
         return _extract_date(matches[-1]) if matches else None
 
@@ -81,7 +83,7 @@ async def _ensure_alert_layers(
         simplified_path = os.path.join(
             data_dir,
             IGeoLayerProcessor.tolerance_versioned_key(
-                f"{layer['simplified_stem']}_L{level}.geojson", tolerance
+                f"{layer['simplified_stem']}_L{detail_level}.geojson", tolerance
             ),
         )
 
@@ -98,22 +100,22 @@ async def _build_alert_cache(settings, logger: Logger) -> None:
     os.makedirs(cache_dir, exist_ok=True)
 
     logger.info(
-        "Building alert cache using simplification level %d",
-        settings.alert_simplification_level,
+        "Building alert cache using detail level %d",
+        settings.alert_detail_level,
     )
 
     def _latest_geojson(stem: str) -> str | None:
         matches = sorted(
             glob.glob(
                 os.path.join(
-                    data_dir, f"{stem}_L{settings.alert_simplification_level}_*.geojson"
+                    data_dir, f"{stem}_L{settings.alert_detail_level}_*.geojson"
                 )
             )
         )
         if not matches:
             logger.warning(
                 "No L%d file found for %s — falling back to latest available",
-                settings.alert_simplification_level,
+                settings.alert_detail_level,
                 stem,
             )
             matches = sorted(glob.glob(os.path.join(data_dir, f"{stem}_*.geojson")))

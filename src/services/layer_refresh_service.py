@@ -33,7 +33,7 @@ class LayerRefreshService:  # pylint: disable=too-few-public-methods
     def _simplified_fnames(self) -> list[str]:
         """Return simplified GeoJSON filenames (with tolerance) for all configured levels."""
         fnames = []
-        for level, tolerance in self.settings.simplification_levels.items():
+        for level, tolerance in self.settings.detail_levels.items():
             tol = IGeoLayerProcessor.tolerance_str(tolerance)
             fnames.append(f"pais_simple_L{level}_T{tol}.geojson")
             fnames.append(f"departamentos_simple_L{level}_T{tol}.geojson")
@@ -65,7 +65,7 @@ class LayerRefreshService:  # pylint: disable=too-few-public-methods
     async def _simplify_layers(self, country_tmp: str, deptos_tmp: str) -> None:
         self.logger.info("Simplifying layers ...")
         data_dir = self.settings.data_dir
-        for level, tolerance in self.settings.simplification_levels.items():
+        for level, tolerance in self.settings.detail_levels.items():
             for stem, tmp in [
                 ("pais_simple", country_tmp),
                 ("departamentos_simple", deptos_tmp),
