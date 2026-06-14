@@ -2,6 +2,7 @@
 
 import asyncio
 import glob
+import io
 import json
 import os
 import pickle
@@ -10,6 +11,7 @@ from logging import Logger
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
+import cartopy.crs as ccrs
 import geopandas as gpd
 from shapely.geometry import shape as shapely_shape
 
@@ -164,6 +166,13 @@ _TOPONIMOS_SHP = os.path.join(_DATOS_DIR, "toponimos.shp")
 # 0.005° ≈ 500 m: invisible at national/regional scale, reduces cache size ~95 %.
 _IGN_SIMPLIFY_TOLERANCE = 0.005
 
+# ign_capas.pkl format version. Geometries (except 'toponimos') are stored
+# pre-projected to ccrs.Mercator() so alert_generation_worker can render them via
+# add_geometries(crs=ccrs.Mercator()), skipping cartopy's expensive per-request
+# trace-based reprojection (~8s/render for ~135k vertices). Bump this when the
+# stored geometry format or projection changes, to force a cache rebuild.
+_IGN_CACHE_FORMAT_VERSION = 2
+
 
 def _leer_toponimos_manual(shp_path: str, logger: Logger) -> list:
     """Lee toponimos.shp sin geopandas/pyogrio para evitar el error de encoding latin-1.
@@ -295,16 +304,25 @@ def _build_ign_cache_sync(cache_dir: str, logger: Logger) -> None:
     logger.info("Building ign_capas.pkl from IGN shapefiles ...")
 
     tol = _IGN_SIMPLIFY_TOLERANCE
+    pc = ccrs.PlateCarree()
+    merc = ccrs.Mercator()
 
     def _simplify_wkb(geoms) -> list:
-        """Simplify and serialise a list of shapely geometries to WKB hex strings."""
+        """Simplify, project to Mercator, and serialise geometries to WKB hex strings.
+
+        Pre-projecting here (one-time, at cache-build) lets the worker render via
+        add_geometries(crs=ccrs.Mercator()), avoiding per-request reprojection.
+        """
         result = []
         for g in geoms:
             if g is None or g.is_empty:
                 continue
             sg = g.simplify(tol, preserve_topology=True)
-            if not sg.is_empty:
-                result.append(sg.wkb_hex)
+            if sg.is_empty:
+                continue
+            pg = merc.project_geometry(sg, pc)
+            if not pg.is_empty:
+                result.append(pg.wkb_hex)
         return result
 
     # --- limites.shp ---------------------------------------------------------
@@ -359,6 +377,7 @@ def _build_ign_cache_sync(cache_dir: str, logger: Logger) -> None:
         toponimos = _leer_toponimos_manual(_TOPONIMOS_SHP, logger)
 
     capas = {
+        "_format_version": _IGN_CACHE_FORMAT_VERSION,
         "grupo_a": _simplify_wkb(ga),
         "grupo_b": _simplify_wkb(gb),
         "grupo_c": _simplify_wkb(gc),
@@ -372,8 +391,20 @@ def _build_ign_cache_sync(cache_dir: str, logger: Logger) -> None:
         pickle.dump(capas, f, protocol=pickle.HIGHEST_PROTOCOL)
 
     size_mb = os.path.getsize(out_path) / 1024 / 1024
-    totals = {k: len(v) for k, v in capas.items()}
+    totals = {k: len(v) for k, v in capas.items() if isinstance(v, (list, dict))}
     logger.info("ign_capas.pkl ready: %s geometries, %.1f MB", totals, size_mb)
+
+
+def _ign_cache_up_to_date(out_path: str) -> bool:
+    """Check whether ign_capas.pkl exists and matches the current cache format."""
+    if not os.path.exists(out_path):
+        return False
+    try:
+        with open(out_path, "rb") as f:
+            capas = pickle.load(f)
+    except (pickle.UnpicklingError, EOFError, OSError):
+        return False
+    return capas.get("_format_version") == _IGN_CACHE_FORMAT_VERSION
 
 
 async def _build_ign_cache(settings, logger: Logger) -> None:
@@ -381,10 +412,65 @@ async def _build_ign_cache(settings, logger: Logger) -> None:
     cache_dir = settings.alert_cache_dir
     os.makedirs(cache_dir, exist_ok=True)
     out_path = os.path.join(cache_dir, "ign_capas.pkl")
-    if os.path.exists(out_path):
-        logger.info("ign_capas.pkl already exists — skipping rebuild.")
+    if _ign_cache_up_to_date(out_path):
+        logger.info(
+            "ign_capas.pkl already exists and is up to date — skipping rebuild."
+        )
         return
     await asyncio.to_thread(_build_ign_cache_sync, cache_dir, logger)
+
+
+# Pre-rasterised cuarterón PNG — name must match
+# alert_generation_worker.CUARTERON_CACHE_NAME.
+_CUARTERON_CACHE_NAME = "cuarteron.png"
+_CUARTERON_SVG_PATH = "/app/data_alerts/cuarteron.svg"
+
+
+def _build_cuarteron_cache_sync(cache_dir: str, logger: Logger) -> None:
+    """Rasterise cuarteron.svg to a transparent-background PNG, cached for the worker.
+
+    Mirrors alert_generation_worker._load_cuarteron_png's on-the-fly rasterisation +
+    pixel masking, but runs once at cache-build time instead of on every alert
+    generation subprocess (~1.9s saved per request).
+    """
+    if not os.path.exists(_CUARTERON_SVG_PATH):
+        logger.warning(
+            "cuarteron.svg not found at %s — skipping cuarteron.png",
+            _CUARTERON_SVG_PATH,
+        )
+        return
+
+    import cairosvg  # local import: heavy native dep, optional
+    import numpy as np
+    from PIL import Image
+
+    out_path = os.path.join(cache_dir, _CUARTERON_CACHE_NAME)
+    png_bytes = cairosvg.svg2png(url=_CUARTERON_SVG_PATH, output_width=600)
+    arr = np.array(Image.open(io.BytesIO(png_bytes)).convert("RGBA"))
+
+    # Pedido SMN: fondo gris (#bebebe) translúcido para que se vea celeste del
+    # mapa por detrás; líneas/borde negros permanecen opacos.
+    r, g, b = arr[..., 0], arr[..., 1], arr[..., 2]
+    is_bg = (
+        (np.abs(r.astype(int) - 190) < 25)
+        & (np.abs(g.astype(int) - 190) < 25)
+        & (np.abs(b.astype(int) - 190) < 25)
+    )
+    arr[is_bg, 3] = 0
+
+    Image.fromarray(arr, "RGBA").save(out_path)
+    logger.info("cuarteron.png ready: %s", out_path)
+
+
+async def _build_cuarteron_cache(settings, logger: Logger) -> None:
+    """Async wrapper: rasterise cuarteron.svg in a thread pool if not already cached."""
+    cache_dir = settings.alert_cache_dir
+    os.makedirs(cache_dir, exist_ok=True)
+    out_path = os.path.join(cache_dir, _CUARTERON_CACHE_NAME)
+    if os.path.exists(out_path):
+        logger.info("cuarteron.png already exists — skipping rebuild.")
+        return
+    await asyncio.to_thread(_build_cuarteron_cache_sync, cache_dir, logger)
 
 
 async def setup_scheduler(settings, logger: Logger) -> AsyncIOScheduler:
@@ -402,6 +488,7 @@ async def setup_scheduler(settings, logger: Logger) -> AsyncIOScheduler:
     await _ensure_alert_layers(settings, logger, processor)
     await _build_alert_cache(settings, logger)
     await _build_ign_cache(settings, logger)
+    await _build_cuarteron_cache(settings, logger)
 
     db_path = os.path.join(data_dir, "history.db")
     history = SqliteHistoryRepository(db_path)

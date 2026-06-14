@@ -24,6 +24,7 @@ Output JSON:
 }
 """
 
+import asyncio
 import io
 import json
 import os
@@ -38,6 +39,7 @@ import matplotlib.patches as mpatches
 import matplotlib.patheffects as pe
 import numpy as np
 from cartopy.mpl.geoaxes import GeoAxes
+from matplotlib.figure import Figure
 from matplotlib.patches import Polygon as MplPolygon
 from matplotlib.font_manager import FontProperties
 from PIL import Image
@@ -57,6 +59,9 @@ FONT_SEMIBOLD = FontProperties(fname="/app/data_alerts/EncodeSans-SemiBold.ttf")
 WATERMARK_PATH = "/app/data_alerts/logo_smn.png"
 HEADER_LOGO_PATH = "/app/data_alerts/logo_smn_header.png"
 CUARTERON_SVG_PATH = "/app/data_alerts/cuarteron.svg"
+# Pre-rasterised cuarterón PNG, built by scheduler._build_cuarteron_cache_sync
+# (mirrors the rasterisation + pixel-masking below) and stored in cache_dir.
+CUARTERON_CACHE_NAME = "cuarteron.png"
 
 # ---------------------------------------------------------------------------
 # Layout — page split into 8 columns × 9 rows (per SMN template).
@@ -279,6 +284,10 @@ def _cargar_capas_ign(cache_path: str) -> dict:
     Load IGN geometries from the pre-built pickle.
     Falls back to an empty dict if the pickle does not exist yet
     (allows the worker to run even before the cache is ready).
+
+    Geometries (except 'toponimos') are stored pre-projected to ccrs.Mercator()
+    by the scheduler's _build_ign_cache_sync, so _agregar_capas_ign can render
+    them via add_geometries(crs=ccrs.Mercator()) without per-request reprojection.
     """
     empty: dict = {
         "grupo_a": [],
@@ -299,11 +308,12 @@ def _cargar_capas_ign(cache_path: str) -> dict:
     with open(cache_path, "rb") as f:
         raw: dict = pickle.load(f)
 
-    # Deserialise WKB hex → shapely geometries (excepto 'toponimos' que son dicts)
+    # Deserialise WKB hex → shapely geometries (excepto 'toponimos' que son dicts
+    # y '_format_version' que es un int de metadata)
     capas: dict = {}
     for key, wkb_list in raw.items():
-        if key == "toponimos":
-            capas[key] = wkb_list  # ya son dicts {lon, lat, nombre, tipo}
+        if key in ("toponimos", "_format_version"):
+            capas[key] = wkb_list  # toponimos ya son dicts {lon, lat, nombre, tipo}
         else:
             capas[key] = [shapely_wkb.loads(w, hex=True) for w in wkb_list]
     return capas
@@ -341,7 +351,15 @@ def _load_index(path: str) -> list:
 
 
 def _load_spatial_indices(payload: dict, cache_dir: str) -> tuple:
-    """Deserialize spatial indices from payload, falling back to disk."""
+    """Deserialize spatial indices from payload, falling back to disk.
+
+    Geometries from the payload are pre-projected to ccrs.Mercator() by
+    AlertGenerationService (see _get_dept_index_merc/_get_prov_geoms_merc). The
+    disk fallback below is only hit if the service didn't provide a payload (e.g.
+    cache not built yet) and yields lon/lat geometries instead — an edge case
+    where the rendered boundaries would be misaligned, accepted as a degraded
+    fallback rather than unavailable.
+    """
     dept_index_serialized = payload.get("dept_index_serialized")
     prov_geoms_serialized = payload.get("prov_geoms_serialized")
 
@@ -374,14 +392,28 @@ def _dept_geoms_en_bbox(dept_index: list, lon_o, lon_e, lat_s, lat_n) -> list:
     ]
 
 
-def _load_cuarteron_png(target_px: int = 600) -> np.ndarray | None:
-    """Rasterise the cuarterón SVG once per process and return as RGBA array.
+def _load_cuarteron_png(
+    cache_dir: str | None = None, target_px: int = 600
+) -> np.ndarray | None:
+    """Return the cuarterón inset as an RGBA array.
 
-    target_px: nominal width in px for the rasterisation; height scales by SVG aspect.
+    Prefers a pre-rasterised PNG built by the scheduler (CUARTERON_CACHE_NAME in
+    cache_dir) — loading it is near-instant, vs. ~1.9s for on-the-fly cairosvg
+    rasterisation + pixel masking on every alert generation subprocess. Falls back
+    to on-the-fly rasterisation if the cache isn't present yet.
+
+    target_px: nominal width in px for the on-the-fly fallback rasterisation.
     """
     global _CUARTERON_PNG  # pylint: disable=global-statement
     if _CUARTERON_PNG is not None:
         return _CUARTERON_PNG
+
+    if cache_dir is not None:
+        prerendered_path = os.path.join(cache_dir, CUARTERON_CACHE_NAME)
+        if os.path.exists(prerendered_path):
+            _CUARTERON_PNG = np.array(Image.open(prerendered_path).convert("RGBA"))
+            return _CUARTERON_PNG
+
     if not os.path.exists(CUARTERON_SVG_PATH):
         print(
             f"ATENCION: cuarterón no encontrado en {CUARTERON_SVG_PATH}",
@@ -589,7 +621,10 @@ def _agregar_capas_ign(ax: GeoAxes, modo: str = "area") -> None:
     El fondo de agua se logra seteando el facecolor del eje antes de llamar
     a esta función.
     """
-    pc = ccrs.PlateCarree()
+    # grupo_a/b/c/d, provincias y paises vienen pre-proyectados a Mercator desde
+    # el cache (ign_capas.pkl) — usar crs=merc evita la reproyección por request
+    # de cartopy (~8s por render para ~135k vértices).
+    merc = ccrs.Mercator()
 
     # Países limítrofes (polígono relleno + borde para mostrar fronteras entre
     # países vecinos, que no están en limites.shp ya que ese solo contiene
@@ -598,7 +633,7 @@ def _agregar_capas_ign(ax: GeoAxes, modo: str = "area") -> None:
         lw_paises = 0.8 if modo == "area" else 1.0
         ax.add_geometries(
             _IGN["paises"],
-            crs=pc,
+            crs=merc,
             facecolor="#bebebe",
             edgecolor="#888888",
             linewidth=lw_paises,
@@ -609,7 +644,7 @@ def _agregar_capas_ign(ax: GeoAxes, modo: str = "area") -> None:
     if _IGN["provincias"]:
         ax.add_geometries(
             _IGN["provincias"],
-            crs=pc,
+            crs=merc,
             facecolor="white",
             edgecolor="none",
             zorder=2,
@@ -621,7 +656,7 @@ def _agregar_capas_ign(ax: GeoAxes, modo: str = "area") -> None:
     if _IGN["grupo_b"]:
         ax.add_geometries(
             _IGN["grupo_b"],
-            crs=pc,
+            crs=merc,
             facecolor="none",
             edgecolor="#656565",
             linewidth=1.5,
@@ -633,7 +668,7 @@ def _agregar_capas_ign(ax: GeoAxes, modo: str = "area") -> None:
     if _IGN["grupo_a"]:
         ax.add_geometries(
             _IGN["grupo_a"],
-            crs=pc,
+            crs=merc,
             facecolor="none",
             edgecolor="#000000",
             linewidth=2.0,
@@ -644,7 +679,7 @@ def _agregar_capas_ign(ax: GeoAxes, modo: str = "area") -> None:
     if _IGN["grupo_c"]:
         ax.add_geometries(
             _IGN["grupo_c"],
-            crs=pc,
+            crs=merc,
             facecolor="none",
             edgecolor="#444444",
             linewidth=1.0,
@@ -656,7 +691,7 @@ def _agregar_capas_ign(ax: GeoAxes, modo: str = "area") -> None:
     if _IGN["grupo_d"]:
         ax.add_geometries(
             _IGN["grupo_d"],
-            crs=pc,
+            crs=merc,
             facecolor="none",
             edgecolor="#444444",
             linewidth=1.0,
@@ -742,7 +777,10 @@ def generar_gif_area(  # pylint: disable=too-many-locals
     lon_o, lon_e = min(lons) - 1.5, max(lons) + 2.5
 
     proj = ccrs.Mercator()
-    fig = plt.figure(figsize=(13.75, 14), dpi=80)
+    # Use matplotlib.figure.Figure directly (not pyplot.figure) so this can run
+    # concurrently with generar_gif_general in a separate thread without touching
+    # pyplot's global figure-manager state.
+    fig = Figure(figsize=(13.75, 14), dpi=80)
     # Margen blanco lateral (15.5% cada lado) para alojar el cuarterón.
     # Sin margen vertical: mapa pegado al borde inferior y al fenómeno arriba.
     ax: GeoAxes = cast(
@@ -760,13 +798,16 @@ def generar_gif_area(  # pylint: disable=too-many-locals
     # --- Mapa base IGN ---
     _agregar_capas_ign(ax, modo="area")
 
-    # Department boundaries filtered to visible bbox
+    # Department boundaries filtered to visible bbox.
+    # dept_index geometries arrive pre-projected to Mercator (see
+    # AlertGenerationService._get_dept_index_merc); bboxes stay in lon/lat for
+    # the extent-based prefilter.
     dept_vis = _dept_geoms_en_bbox(dept_index, lon_o, lon_e, lat_s, lat_n)
     if dept_vis:
         # Guía SMN interdepartamental: #C4C4C4, 0.5 px, línea simple continua
         ax.add_geometries(
             dept_vis,
-            crs=ccrs.PlateCarree(),
+            crs=ccrs.Mercator(),
             edgecolor="#C4C4C4",
             facecolor="none",
             linewidth=0.5,
@@ -775,11 +816,12 @@ def generar_gif_area(  # pylint: disable=too-many-locals
 
     # Province boundaries from alert cache (all, thicker line) — zorder 8
     # These are the prov_geoms from the dept/prov spatial index (GeoJSONs),
-    # kept here as a second source in case IGN data is unavailable.
+    # pre-projected to Mercator, kept here as a second source in case IGN data
+    # is unavailable.
     if prov_geoms and not _IGN["provincias"]:
         ax.add_geometries(
             prov_geoms,
-            crs=ccrs.PlateCarree(),
+            crs=ccrs.Mercator(),
             edgecolor="black",
             facecolor="none",
             linewidth=1.8,
@@ -899,7 +941,6 @@ def generar_gif_area(  # pylint: disable=too-many-locals
     fig.savefig(
         tmp, format="png", bbox_inches=None, pad_inches=0, facecolor="white", dpi=80
     )
-    plt.close(fig)
     Image.open(tmp).convert("RGB").convert("P", palette=Image.Palette.ADAPTIVE).save(
         out, format="GIF"
     )
@@ -915,7 +956,7 @@ def generar_gif_general(text, coords, timestamp, output_dir, dept_geoms, prov_ge
     xy = list(zip(lons, lats))
 
     proj = ccrs.Mercator()
-    fig_final = plt.figure(figsize=(13.75, 14), dpi=80)
+    fig_final = Figure(figsize=(13.75, 14), dpi=80)
     ax_map: GeoAxes = cast(
         GeoAxes, fig_final.add_axes((0, 0.0, 1, MAP_TOP), projection=proj)
     )
@@ -935,12 +976,12 @@ def generar_gif_general(text, coords, timestamp, output_dir, dept_geoms, prov_ge
     # --- Mapa base IGN ---
     _agregar_capas_ign(ax_map, modo="gral")
 
-    # All department boundaries
+    # All department boundaries (pre-projected to Mercator, see generar_gif_area)
     # Guía SMN interdepartamental: #C4C4C4, 0.5 px, línea simple continua
     if dept_geoms:
         ax_map.add_geometries(
             dept_geoms,
-            crs=ccrs.PlateCarree(),
+            crs=ccrs.Mercator(),
             edgecolor="#C4C4C4",
             facecolor="none",
             linewidth=0.5,
@@ -951,7 +992,7 @@ def generar_gif_general(text, coords, timestamp, output_dir, dept_geoms, prov_ge
     if prov_geoms and not _IGN["provincias"]:
         ax_map.add_geometries(
             prov_geoms,
-            crs=ccrs.PlateCarree(),
+            crs=ccrs.Mercator(),
             edgecolor="black",
             facecolor="none",
             linewidth=1.8,
@@ -985,7 +1026,6 @@ def generar_gif_general(text, coords, timestamp, output_dir, dept_geoms, prov_ge
     fig_final.savefig(
         tmp, format="png", bbox_inches=None, pad_inches=0, facecolor="white", dpi=80
     )
-    plt.close(fig_final)
     Image.open(tmp).convert("RGB").convert("P", palette=Image.Palette.ADAPTIVE).save(
         out, format="GIF"
     )
@@ -994,7 +1034,7 @@ def generar_gif_general(text, coords, timestamp, output_dir, dept_geoms, prov_ge
     return out
 
 
-def main():
+async def main():
     """Read request from stdin, generate GIFs, write result to stdout."""
     try:
         payload = json.load(sys.stdin)
@@ -1035,19 +1075,34 @@ def main():
         coords_raw = list(geom.exterior.coords)
         coords = [(lon, lat) for lat, lon in coords_raw]  # swap to (lat, lon)
 
-        # Generate GIFs
-        gif_area = generar_gif_area(
-            phenomenon_text,
-            coords,
-            affected_departments,
-            timestamp,
-            output_dir,
-            all_departments,
-            dept_index,
-            prov_geoms,
-        )
-        gif_gral = generar_gif_general(
-            phenomenon_text, coords, timestamp, output_dir, dept_geoms_all, prov_geoms
+        # Pre-warm the cuarterón rasterisation before going parallel: it's cached
+        # in a module-level global and is not safe to race from both threads.
+        _load_cuarteron_png(cache_dir)
+
+        # Generate both GIFs concurrently — independent figures, no shared mutable
+        # state. Most of the cost is in cartopy/shapely/Agg C extensions, which
+        # release the GIL, so this overlaps real work instead of just I/O.
+        gif_area, gif_gral = await asyncio.gather(
+            asyncio.to_thread(
+                generar_gif_area,
+                phenomenon_text,
+                coords,
+                affected_departments,
+                timestamp,
+                output_dir,
+                all_departments,
+                dept_index,
+                prov_geoms,
+            ),
+            asyncio.to_thread(
+                generar_gif_general,
+                phenomenon_text,
+                coords,
+                timestamp,
+                output_dir,
+                dept_geoms_all,
+                prov_geoms,
+            ),
         )
 
         # Write result
@@ -1068,4 +1123,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
