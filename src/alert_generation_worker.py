@@ -470,6 +470,37 @@ def _pick_far_corner(coords_lonlat, lon_o, lon_e, lat_s, lat_n) -> str:
     return f"{vert}{horiz}"
 
 
+def _dibujar_borde_fenomeno(fig, ax_ph) -> None:
+    """Draw the phenomenon band's red border as 4 filled bars.
+
+    A stroked rectangle's corners rely on sub-pixel AA join coverage, which
+    can leave a 1px gap at a corner. Filled bars always meet cleanly at the
+    corners and give a uniform border thickness on all four sides.
+    """
+    border_px = 3
+    fig_w_in, fig_h_in = fig.get_size_inches()
+    bx = border_px / (fig_w_in * fig.dpi)
+    by = border_px / (fig_h_in * fig.dpi * PHENOM_H)
+
+    for x0, y0, w, h in (
+        (0, 1 - by, 1, by),  # top
+        (0, 0, 1, by),  # bottom
+        (0, 0, bx, 1),  # left
+        (1 - bx, 0, bx, 1),  # right
+    ):
+        ax_ph.add_patch(
+            mpatches.Rectangle(
+                (x0, y0),
+                w,
+                h,
+                facecolor="red",
+                edgecolor="none",
+                transform=ax_ph.transAxes,
+                clip_on=False,
+            )
+        )
+
+
 def _panel_aviso(fig, texto, modo="area"):
     """Render header band (title + logo) and phenomenon band per SMN template."""
     # ---- Header band: 1 module = 1/9 of figure height ----
@@ -533,18 +564,21 @@ def _panel_aviso(fig, texto, modo="area"):
     ax_ph.set_ylim(0, 1)
     ax_ph.axis("off")
 
+    # White background fill (no border — the red border is drawn separately
+    # below as 4 solid bars).
     ax_ph.add_patch(
         mpatches.Rectangle(
             (0, 0),
             1,
             1,
             facecolor="white",
-            edgecolor="red",
-            linewidth=2.5,
+            edgecolor="none",
             transform=ax_ph.transAxes,
             clip_on=False,
         )
     )
+
+    _dibujar_borde_fenomeno(fig, ax_ph)
 
     ax_ph.text(
         0.02,
