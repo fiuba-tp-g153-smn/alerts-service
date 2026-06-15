@@ -154,29 +154,29 @@ async def _build_alert_cache(settings, logger: Logger) -> None:
         logger.info(f"  → {count} geometries → {out_name} ({size_mb:.1f} MB)")
 
 
-_DATOS_DIR = "/app/data_alerts"
-_LIMITES_SHP = os.path.join(_DATOS_DIR, "limites.shp")
-_PROVINCIAS_SHP = os.path.join(_DATOS_DIR, "Provincias.shp")
-_REFERENCIAS_SHP = os.path.join(_DATOS_DIR, "referencias.shp")
-_TOPONIMOS_SHP = os.path.join(_DATOS_DIR, "toponimos.shp")
+_DATA_DIR = "/app/data_alerts"
+_BORDERS_SHP = os.path.join(_DATA_DIR, "limites.shp")
+_PROVINCES_SHP = os.path.join(_DATA_DIR, "Provincias.shp")
+_REFERENCES_SHP = os.path.join(_DATA_DIR, "referencias.shp")
+_PLACE_LABELS_SHP = os.path.join(_DATA_DIR, "toponimos.shp")
 
 # Simplification tolerance for IGN geometries in the cache.
 # 0.005° ≈ 500 m: invisible at national/regional scale, reduces cache size ~95 %.
 _IGN_SIMPLIFY_TOLERANCE = 0.005
 
 
-def _leer_toponimos_manual(shp_path: str, logger: Logger) -> list:
-    """Lee toponimos.shp sin geopandas/pyogrio para evitar el error de encoding latin-1.
+def _read_place_labels_manual(shp_path: str, logger: Logger) -> list:
+    """Read toponimos.shp without geopandas/pyogrio to avoid the latin-1 encoding error.
 
-    Parsea el DBF con latin-1 vía stdlib y extrae coordenadas PointZ del SHP.
-    Filtra solo los tipos relevantes para el mapa: 'arg', 'continen' (con Arg.),
-    e 'isla'.
+    Parses the DBF with latin-1 via stdlib and extracts PointZ coordinates from the SHP.
+    Filters only the types relevant for the map: 'arg', 'continen' (with Arg.),
+    and 'isla'.
     """
     import struct
 
     dbf_path = shp_path.replace(".shp", ".dbf")
 
-    # --- Leer atributos del DBF (latin-1) ------------------------------------
+    # --- Read DBF attributes (latin-1) ---------------------------------------
     attrs: list = []
     try:
         with open(dbf_path, "rb") as f:
@@ -214,13 +214,13 @@ def _leer_toponimos_manual(shp_path: str, logger: Logger) -> list:
                         rec[fname] = raw.rstrip(b"\x00").decode(
                             "latin-1", errors="replace"
                         )
-                if flag != b"*":  # no es registro eliminado
+                if flag != b"*":  # not a deleted record
                     attrs.append(rec)
     except Exception as exc:
-        logger.warning("No se pudo leer %s: %s", dbf_path, exc)
+        logger.warning("Could not read %s: %s", dbf_path, exc)
         return []
 
-    # --- Leer coordenadas del SHP (PointZ = tipo 13, Point = tipo 1) ---------
+    # --- Read SHP coordinates (PointZ = type 13, Point = type 1) -------------
     coords: list = []
     try:
         with open(shp_path, "rb") as f:
@@ -236,63 +236,63 @@ def _leer_toponimos_manual(shp_path: str, logger: Logger) -> list:
                     coords.append((None, None))
                     continue
                 stype = struct.unpack("<i", content[:4])[0]
-                if stype in (1, 13) and len(content) >= 20:  # Point o PointZ
+                if stype in (1, 13) and len(content) >= 20:  # Point or PointZ
                     x, y = struct.unpack("<dd", content[4:20])
                     coords.append((round(x, 4), round(y, 4)))
                 else:
                     coords.append((None, None))
     except Exception as exc:
-        logger.warning("No se pudo leer %s: %s", shp_path, exc)
+        logger.warning("Could not read %s: %s", shp_path, exc)
         return []
 
-    # --- Combinar y filtrar --------------------------------------------------
-    TIPOS = {"arg", "continen", "isla"}
-    EXCLUIR = {
+    # --- Combine and filter ---------------------------------------------------
+    TYPES = {"arg", "continen", "isla"}
+    EXCLUDE = {
         "ISLAS AURORA (Arg.)",
         "ISLAS GEORGIAS DEL SUR (Arg.)",
         "ISLAS SANDWICH DEL SUR (Arg.)",
     }
-    resultado: list = []
+    result: list = []
     for (lon, lat), attr in zip(coords, attrs):
         if lon is None:
             continue
-        tipo = str(attr.get("tipo", "") or "")
-        nombre = str(attr.get("nombre", "") or "")
-        if tipo not in TIPOS:
+        kind = str(attr.get("tipo", "") or "")
+        name = str(attr.get("nombre", "") or "")
+        if kind not in TYPES:
             continue
-        if tipo == "continen" and "(Arg.)" not in nombre:
+        if kind == "continen" and "(Arg.)" not in name:
             continue
-        if nombre in EXCLUIR:
+        if name in EXCLUDE:
             continue
-        # Malvinas: mostrar solo "(Arg.)" sin el nombre completo
-        if nombre == "ISLAS MALVINAS (Arg.)":
-            nombre = "(Arg.)"
-        resultado.append({"lon": lon, "lat": lat, "nombre": nombre, "tipo": tipo})
+        # Malvinas: show only "(Arg.)" without the full name
+        if name == "ISLAS MALVINAS (Arg.)":
+            name = "(Arg.)"
+        result.append({"lon": lon, "lat": lat, "nombre": name, "tipo": kind})
 
-    logger.info("Toponimos cargados: %d etiquetas (Arg.) + islas", len(resultado))
-    return resultado
+    logger.info("Place labels loaded: %d (Arg.) labels + islands", len(result))
+    return result
 
 
 def _build_ign_cache_sync(cache_dir: str, logger: Logger) -> None:
-    """Read IGN shapefiles, simplify geometries, and persist to ign_capas.pkl.
+    """Read IGN shapefiles, simplify geometries, and persist to ign_layers.pkl.
 
     Groups:
-      grupo_a – internacional + lecho RdlP + lateral marítimo arg-uru  (solid thick)
-      grupo_b – interprovincial + línea de costa                        (solid thin)
-      grupo_c – exterior Río de la Plata                                (dashed)
-      grupo_d – sector antártico (by NAM)                               (dot-dash)
-      provincias – province polygons                                    (fill white)
-      paises    – neighbouring countries (tipo='país')                  (fill grey)
-      toponimos – point labels: (Arg.) markers + island/country names   (text)
+      group_a – international + Rio de la Plata bed + arg-uru maritime lateral (solid thick)
+      group_b – interprovincial + coastline                                    (solid thin)
+      group_c – outer Rio de la Plata                                          (dashed)
+      group_d – Antarctic sector (by NAM)                                      (dot-dash)
+      provinces – province polygons                                    (fill white)
+      countries    – neighbouring countries (tipo='país')                  (fill grey)
+      place_labels – point labels: (Arg.) markers + island/country names   (text)
     """
-    if not os.path.exists(_LIMITES_SHP):
+    if not os.path.exists(_BORDERS_SHP):
         logger.warning(
-            "IGN shapefiles not found at %s — skipping ign_capas.pkl", _DATOS_DIR
+            "IGN shapefiles not found at %s — skipping ign_layers.pkl", _DATA_DIR
         )
         return
 
-    out_path = os.path.join(cache_dir, "ign_capas.pkl")
-    logger.info("Building ign_capas.pkl from IGN shapefiles ...")
+    out_path = os.path.join(cache_dir, "ign_layers.pkl")
+    logger.info("Building ign_layers.pkl from IGN shapefiles ...")
 
     tol = _IGN_SIMPLIFY_TOLERANCE
 
@@ -308,18 +308,18 @@ def _build_ign_cache_sync(cache_dir: str, logger: Logger) -> None:
         return result
 
     # --- limites.shp ---------------------------------------------------------
-    lim = gpd.read_file(_LIMITES_SHP)
+    lim = gpd.read_file(_BORDERS_SHP)
     obj_col = "Objeto" if "Objeto" in lim.columns else "objeto"
     nam_col = "NAM" if "NAM" in lim.columns else "nam"
 
-    GRUPO_A = {
+    GROUP_A = {
         "Límite internacional",
         "Límite del lecho y subsuelo del Río de la Plata",
         "Límite lateral marítimo argentino-uruguayo",
     }
-    GRUPO_B = {"Límite Interprovincial", "Línea de costa"}
-    GRUPO_C = {"Límite exterior del Río de la Plata"}
-    SECTOR_ANTARTICO = "Límite del Sector Antártico Argentino"
+    GROUP_B = {"Límite Interprovincial", "Línea de costa"}
+    GROUP_C = {"Límite exterior del Río de la Plata"}
+    ANTARCTIC_SECTOR = "Límite del Sector Antártico Argentino"
 
     ga, gb, gc, gd = [], [], [], []
     for _, row in lim.iterrows():
@@ -328,61 +328,61 @@ def _build_ign_cache_sync(cache_dir: str, logger: Logger) -> None:
             continue
         obj = row.get(obj_col, "") or ""
         nam = row.get(nam_col, "") or ""
-        if SECTOR_ANTARTICO in nam:
+        if ANTARCTIC_SECTOR in nam:
             gd.append(geom)
-        elif obj in GRUPO_A:
+        elif obj in GROUP_A:
             ga.append(geom)
-        elif obj in GRUPO_B:
+        elif obj in GROUP_B:
             gb.append(geom)
-        elif obj in GRUPO_C:
+        elif obj in GROUP_C:
             gc.append(geom)
 
     # --- Provincias.shp ------------------------------------------------------
-    provincias_wkb: list = []
-    if os.path.exists(_PROVINCIAS_SHP):
-        prov_df = gpd.read_file(_PROVINCIAS_SHP)
-        provincias_wkb = _simplify_wkb(list(prov_df.geometry))
+    provinces_wkb: list = []
+    if os.path.exists(_PROVINCES_SHP):
+        prov_df = gpd.read_file(_PROVINCES_SHP)
+        provinces_wkb = _simplify_wkb(list(prov_df.geometry))
 
-    # --- referencias.shp (países limítrofes) ---------------------------------
-    paises_wkb: list = []
-    if os.path.exists(_REFERENCIAS_SHP):
-        ref_df = gpd.read_file(_REFERENCIAS_SHP)
-        tipo_col = "tipo" if "tipo" in ref_df.columns else "TIPO"
-        paises_df = ref_df[ref_df[tipo_col] == "país"]
-        paises_wkb = _simplify_wkb(list(paises_df.geometry))
+    # --- referencias.shp (neighboring countries) ------------------------------
+    countries_wkb: list = []
+    if os.path.exists(_REFERENCES_SHP):
+        ref_df = gpd.read_file(_REFERENCES_SHP)
+        type_col = "tipo" if "tipo" in ref_df.columns else "TIPO"
+        countries_df = ref_df[ref_df[type_col] == "país"]
+        countries_wkb = _simplify_wkb(list(countries_df.geometry))
 
-    # --- toponimos.shp (etiquetas de texto: (Arg.), nombres de islas, etc.) ---
-    # pyogrio (backend de geopandas) NO soporta el paramétro encoding para
-    # shapefiles, por lo que leemos el archivo manualmente con stdlib.
-    toponimos: list = []
-    if os.path.exists(_TOPONIMOS_SHP):
-        toponimos = _leer_toponimos_manual(_TOPONIMOS_SHP, logger)
+    # --- toponimos.shp (text labels: (Arg.), island names, etc.) ---------------
+    # pyogrio (geopandas backend) does NOT support the encoding parameter for
+    # shapefiles, so we read the file manually with stdlib.
+    place_labels: list = []
+    if os.path.exists(_PLACE_LABELS_SHP):
+        place_labels = _read_place_labels_manual(_PLACE_LABELS_SHP, logger)
 
-    capas = {
-        "grupo_a": _simplify_wkb(ga),
-        "grupo_b": _simplify_wkb(gb),
-        "grupo_c": _simplify_wkb(gc),
-        "grupo_d": _simplify_wkb(gd),
-        "provincias": provincias_wkb,
-        "paises": paises_wkb,
-        "toponimos": toponimos,
+    layers = {
+        "group_a": _simplify_wkb(ga),
+        "group_b": _simplify_wkb(gb),
+        "group_c": _simplify_wkb(gc),
+        "group_d": _simplify_wkb(gd),
+        "provinces": provinces_wkb,
+        "countries": countries_wkb,
+        "place_labels": place_labels,
     }
 
     with open(out_path, "wb") as f:
-        pickle.dump(capas, f, protocol=pickle.HIGHEST_PROTOCOL)
+        pickle.dump(layers, f, protocol=pickle.HIGHEST_PROTOCOL)
 
     size_mb = os.path.getsize(out_path) / 1024 / 1024
-    totals = {k: len(v) for k, v in capas.items()}
-    logger.info("ign_capas.pkl ready: %s geometries, %.1f MB", totals, size_mb)
+    totals = {k: len(v) for k, v in layers.items()}
+    logger.info("ign_layers.pkl ready: %s geometries, %.1f MB", totals, size_mb)
 
 
 async def _build_ign_cache(settings, logger: Logger) -> None:
     """Async wrapper: run IGN shapefile pre-processing in a thread pool."""
     cache_dir = settings.alert_cache_dir
     os.makedirs(cache_dir, exist_ok=True)
-    out_path = os.path.join(cache_dir, "ign_capas.pkl")
+    out_path = os.path.join(cache_dir, "ign_layers.pkl")
     if os.path.exists(out_path):
-        logger.info("ign_capas.pkl already exists — skipping rebuild.")
+        logger.info("ign_layers.pkl already exists — skipping rebuild.")
         return
     await asyncio.to_thread(_build_ign_cache_sync, cache_dir, logger)
 

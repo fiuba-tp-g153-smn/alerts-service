@@ -56,7 +56,7 @@ FONT_MEDIUM = FontProperties(fname="/app/data_alerts/EncodeSans-Medium.ttf")
 FONT_SEMIBOLD = FontProperties(fname="/app/data_alerts/EncodeSans-SemiBold.ttf")
 WATERMARK_PATH = "/app/data_alerts/logo_smn.png"
 HEADER_LOGO_PATH = "/app/data_alerts/logo_smn_header.png"
-CUARTERON_SVG_PATH = "/app/data_alerts/cuarteron.svg"
+INSET_SVG_PATH = "/app/data_alerts/cuarteron.svg"
 
 # ---------------------------------------------------------------------------
 # Layout — page split into 8 columns × 9 rows (per SMN template).
@@ -73,18 +73,18 @@ HEADER_BG = "#252c4f"
 HEADER_ALPHA = 0.9  # 10% transparency
 
 _IGN: dict | None = None  # loaded lazily on first call inside main()
-_CUARTERON_PNG: np.ndarray | None = None  # rasterised once per process
+_INSET_PNG: np.ndarray | None = None  # rasterised once per process
 
 # ---------------------------------------------------------------------------
-# Cabeceras AMBA (pedido SMN) — dentro del bbox AMBA se muestran SOLO estos
-# partidos, etiquetados con su cabecera; el resto del conurbano se oculta para
-# no saturar. Fuera del bbox se mantiene el nombre del departamento.
+# AMBA seats (requested by SMN) — within the AMBA bbox, ONLY these
+# districts are shown, labeled with their seat; the rest of the conurbano
+# is hidden to avoid clutter. Outside the bbox, the department name is kept.
 # ---------------------------------------------------------------------------
-# bbox: CABA + Gran Buenos Aires (conurbano), no toda la provincia.
+# bbox: CABA + Greater Buenos Aires (conurbano), not the whole province.
 AMBA_BBOX = (-59.20, -57.80, -35.25, -34.05)  # (lon_o, lon_e, lat_s, lat_n)
 
-# Clave = nombre de partido normalizado (sin acentos, minúsculas); valor = cabecera.
-_AMBA_PARES = {
+# Key = normalized district name (no accents, lowercase); value = seat.
+_AMBA_PAIRS = {
     "Almirante Brown": "Adrogué",
     "Avellaneda": "Avellaneda",
     "Berazategui": "Berazategui",
@@ -122,15 +122,15 @@ def _norm(s: str) -> str:
     return " ".join(sin_acentos.lower().split())
 
 
-AMBA_CABECERAS = {_norm(k): v for k, v in _AMBA_PARES.items()}
+AMBA_SEATS = {_norm(k): v for k, v in _AMBA_PAIRS.items()}
 
 # ---------------------------------------------------------------------------
-# Cabeceras del resto del país (pedido SMN) — fuera del bbox AMBA se muestra la
-# cabecera en lugar del nombre del departamento. Clave = (provincia, depto)
-# porque "Capital" se repite en varias provincias con cabeceras distintas.
-# Departamentos sin entrada: se mantiene el nombre del departamento (incremental).
+# Seats for the rest of the country (requested by SMN) — outside the AMBA bbox,
+# the seat is shown instead of the department name. Key = (province, dept)
+# because "Capital" repeats across several provinces with different seats.
+# Departments without an entry: the department name is kept (incremental).
 # ---------------------------------------------------------------------------
-_CABECERAS_NACIONAL_PARES = {
+_NATIONAL_SEATS_PAIRS = {
     # --- Jujuy ---
     ("Jujuy", "Yavi"): "La Quiaca",
     ("Jujuy", "Dr Manuel Belgrano"): "San Salvador de Jujuy",
@@ -201,7 +201,7 @@ _CABECERAS_NACIONAL_PARES = {
     ("Mendoza", "San Rafael"): "San Rafael",
     ("Mendoza", "Malargüe"): "Malargüe",
     ("Mendoza", "San Carlos"): "San Carlos",
-    # --- Buenos Aires (fuera del bbox AMBA) ---
+    # --- Buenos Aires (outside the AMBA bbox) ---
     ("Buenos Aires", "Pergamino"): "Pergamino",
     ("Buenos Aires", "Junín"): "Junín",
     ("Buenos Aires", "General Villegas"): "General Villegas",
@@ -242,31 +242,31 @@ _CABECERAS_NACIONAL_PARES = {
     ("Chubut", "Paso de Indios"): "Paso de Indios",
 }
 
-CABECERAS_NACIONAL = {
+NATIONAL_SEATS = {
     (_norm(prov), _norm(dep)): cab
-    for (prov, dep), cab in _CABECERAS_NACIONAL_PARES.items()
+    for (prov, dep), cab in _NATIONAL_SEATS_PAIRS.items()
 }
 
 
-def _etiqueta_departamento(
-    nom_depto: str, provincia: str, lon: float, lat: float
+def _department_label(
+    dept_name: str, province: str, lon: float, lat: float
 ) -> str | None:
-    """Texto a mostrar para un departamento, o None si debe ocultarse.
+    """Text to display for a department, or None if it should be hidden.
 
-    - Comunas CABA ("Comuna N"): ocultas.
-    - Dentro del bbox AMBA: solo los partidos del listado SMN (con su cabecera);
-      el resto se oculta para no saturar.
-    - Fuera del bbox AMBA: se usa la cabecera del listado nacional si existe;
-      si no, se mantiene el nombre del departamento.
+    - CABA communes ("Comuna N"): hidden.
+    - Within the AMBA bbox: only the SMN-listed districts (with their seat);
+      the rest are hidden to avoid clutter.
+    - Outside the AMBA bbox: use the national seat list if it exists;
+      otherwise keep the department name.
     """
-    if nom_depto.lower().startswith("comuna ") and nom_depto[7:].strip().isdigit():
+    if dept_name.lower().startswith("comuna ") and dept_name[7:].strip().isdigit():
         return None
 
     lon_o, lon_e, lat_s, lat_n = AMBA_BBOX
-    en_amba = lon_o <= lon <= lon_e and lat_s <= lat <= lat_n
-    if en_amba:
-        return AMBA_CABECERAS.get(_norm(nom_depto))  # None si no está en el listado
-    return CABECERAS_NACIONAL.get((_norm(provincia), _norm(nom_depto)), nom_depto)
+    in_amba = lon_o <= lon <= lon_e and lat_s <= lat <= lat_n
+    if in_amba:
+        return AMBA_SEATS.get(_norm(dept_name))  # None if not in the list
+    return NATIONAL_SEATS.get((_norm(province), _norm(dept_name)), dept_name)
 
 
 # ---------------------------------------------------------------------------
@@ -274,24 +274,24 @@ def _etiqueta_departamento(
 # ---------------------------------------------------------------------------
 
 
-def _cargar_capas_ign(cache_path: str) -> dict:
+def _load_ign_layers(cache_path: str) -> dict:
     """
     Load IGN geometries from the pre-built pickle.
     Falls back to an empty dict if the pickle does not exist yet
     (allows the worker to run even before the cache is ready).
     """
     empty: dict = {
-        "grupo_a": [],
-        "grupo_b": [],
-        "grupo_c": [],
-        "grupo_d": [],
-        "provincias": [],
-        "paises": [],
-        "toponimos": [],
+        "group_a": [],
+        "group_b": [],
+        "group_c": [],
+        "group_d": [],
+        "provinces": [],
+        "countries": [],
+        "place_labels": [],
     }
     if not os.path.exists(cache_path):
         print(
-            f"ATENCION: {cache_path} no encontrado. Mapa base IGN omitido.",
+            f"WARNING: {cache_path} not found. Skipping IGN base map.",
             file=sys.stderr,
         )
         return empty
@@ -299,27 +299,28 @@ def _cargar_capas_ign(cache_path: str) -> dict:
     with open(cache_path, "rb") as f:
         raw: dict = pickle.load(f)
 
-    # Deserialise WKB hex → shapely geometries (excepto 'toponimos' que son dicts)
-    capas: dict = {}
+    # Deserialise WKB hex → shapely geometries (except 'place_labels' which are dicts)
+    layers: dict = {}
     for key, wkb_list in raw.items():
-        if key == "toponimos":
-            capas[key] = wkb_list  # ya son dicts {lon, lat, nombre, tipo}
+        if key == "place_labels":
+            layers[key] = wkb_list  # already dicts {lon, lat, nombre, tipo}
         else:
-            capas[key] = [shapely_wkb.loads(w, hex=True) for w in wkb_list]
-    return capas
+            layers[key] = [shapely_wkb.loads(w, hex=True) for w in wkb_list]
+    return layers
 
 
-def _agregar_marca_de_agua(fig):
+def _add_watermark(fig):
     """Add a low-opacity watermark over the map area (not header/phenom)."""
     if os.path.exists(WATERMARK_PATH):
         img = plt.imread(WATERMARK_PATH)
-        # Marca de agua grande: casi toca borde inferior del fenómeno (MAP_TOP),
-        # nunca lo invade. Logo es ~cuadrado; ajustamos ancho según aspect de figura.
+        # Large watermark: almost touches the bottom edge of the phenomenon
+        # (MAP_TOP), never overlaps it. Logo is ~square; adjust width based on
+        # figure aspect ratio.
         wm_y = 0.02
         gap = 0.015
-        wm_h = MAP_TOP - wm_y - gap  # alto = casi toda el área del mapa
+        wm_h = MAP_TOP - wm_y - gap  # height = almost the whole map area
         fw_in, fh_in = fig.get_size_inches()
-        wm_w = wm_h * (fh_in / fw_in)  # mantiene aspect 1:1 visual
+        wm_w = wm_h * (fh_in / fw_in)  # keeps 1:1 visual aspect
         wm_x = (1.0 - wm_w) / 2.0
         ax_wm = fig.add_axes([wm_x, wm_y, wm_w, wm_h], facecolor="none")
         ax_wm.set_zorder(100)
@@ -327,7 +328,7 @@ def _agregar_marca_de_agua(fig):
         ax_wm.imshow(img, alpha=0.3, zorder=100)
     else:
         print(
-            f"ATENCION: No se encontró el logo en la ruta: {WATERMARK_PATH}",
+            f"WARNING: Logo not found at path: {WATERMARK_PATH}",
             file=sys.stderr,
         )
 
@@ -365,7 +366,7 @@ def _load_spatial_indices(payload: dict, cache_dir: str) -> tuple:
     return dept_index, dept_geoms_all, prov_geoms
 
 
-def _dept_geoms_en_bbox(dept_index: list, lon_o, lon_e, lat_s, lat_n) -> list:
+def _dept_geoms_in_bbox(dept_index: list, lon_o, lon_e, lat_s, lat_n) -> list:
     """Filter department geometries that overlap the given bounding box."""
     return [
         g
@@ -374,58 +375,58 @@ def _dept_geoms_en_bbox(dept_index: list, lon_o, lon_e, lat_s, lat_n) -> list:
     ]
 
 
-def _load_cuarteron_png(target_px: int = 600) -> np.ndarray | None:
-    """Rasterise the cuarterón SVG once per process and return as RGBA array.
+def _load_inset_png(target_px: int = 600) -> np.ndarray | None:
+    """Rasterise the corner-inset SVG once per process and return as RGBA array.
 
     target_px: nominal width in px for the rasterisation; height scales by SVG aspect.
     """
-    global _CUARTERON_PNG  # pylint: disable=global-statement
-    if _CUARTERON_PNG is not None:
-        return _CUARTERON_PNG
-    if not os.path.exists(CUARTERON_SVG_PATH):
+    global _INSET_PNG  # pylint: disable=global-statement
+    if _INSET_PNG is not None:
+        return _INSET_PNG
+    if not os.path.exists(INSET_SVG_PATH):
         print(
-            f"ATENCION: cuarterón no encontrado en {CUARTERON_SVG_PATH}",
+            f"WARNING: corner inset not found at {INSET_SVG_PATH}",
             file=sys.stderr,
         )
         return None
     try:
         import cairosvg  # local import: heavy native dep, optional
 
-        png_bytes = cairosvg.svg2png(url=CUARTERON_SVG_PATH, output_width=target_px)
+        png_bytes = cairosvg.svg2png(url=INSET_SVG_PATH, output_width=target_px)
         arr = np.array(Image.open(io.BytesIO(png_bytes)).convert("RGBA"))
-        # Pedido SMN: fondo gris (#bebebe) translúcido para que se vea celeste del
-        # mapa por detrás; líneas/borde negros permanecen opacos.
+        # SMN request: translucent gray background (#bebebe) so the map's light
+        # blue shows through behind it; black lines/borders remain opaque.
         r, g, b = arr[..., 0], arr[..., 1], arr[..., 2]
-        # Pixel "fondo gris": canal cerca de 190 ± tolerancia, sin sesgo de color
+        # "Gray background" pixel: channel near 190 ± tolerance, no color bias
         is_bg = (
             (np.abs(r.astype(int) - 190) < 25)
             & (np.abs(g.astype(int) - 190) < 25)
             & (np.abs(b.astype(int) - 190) < 25)
         )
         arr[is_bg, 3] = (
-            0  # fondo gris totalmente transparente — celeste del mapa pasa limpio
+            0  # gray background fully transparent — map's light blue shows through
         )
-        _CUARTERON_PNG = arr
-        return _CUARTERON_PNG
+        _INSET_PNG = arr
+        return _INSET_PNG
     except Exception as exc:  # pylint: disable=broad-exception-caught
-        print(f"ATENCION: fallo rasterizando cuarterón: {exc}", file=sys.stderr)
+        print(f"WARNING: failed to rasterise corner inset: {exc}", file=sys.stderr)
         return None
 
 
-def _agregar_cuarteron(
+def _add_inset(
     fig,
     anchor: str = "br",
     width_frac: float = 0.13,
     margin_x: float = 0.015,
     margin_y: float = 0.015,
 ) -> None:
-    """Place cuarterón inset at one of the map corners.
+    """Place the corner inset at one of the map corners.
 
     anchor: one of 'br' (bottom-right), 'bl', 'tr', 'tl'.
     width_frac: width in figure-fraction coords.
-    margin_x/margin_y: distancia desde el borde correspondiente (figure coords).
+    margin_x/margin_y: distance from the corresponding edge (figure coords).
     """
-    img = _load_cuarteron_png()
+    img = _load_inset_png()
     if img is None:
         return
 
@@ -444,12 +445,12 @@ def _agregar_cuarteron(
         y = MAP_TOP - height_frac - margin_y
 
     ax_c = fig.add_axes([x, y, width_frac, height_frac])
-    ax_c.set_facecolor("none")  # fondo transparente → celeste del mapa pasa
+    ax_c.set_facecolor("none")  # transparent background → map's light blue shows through
     ax_c.patch.set_alpha(0)
     ax_c.imshow(img, interpolation="bilinear")
     ax_c.set_xticks([])
     ax_c.set_yticks([])
-    # Borde fino gris #bebebe alrededor del cuarterón
+    # Thin gray border #bebebe around the corner inset
     for spine in ax_c.spines.values():
         spine.set_edgecolor("#bebebe")
         spine.set_linewidth(0.8)
@@ -470,7 +471,7 @@ def _pick_far_corner(coords_lonlat, lon_o, lon_e, lat_s, lat_n) -> str:
     return f"{vert}{horiz}"
 
 
-def _dibujar_borde_fenomeno(fig, ax_ph) -> None:
+def _draw_phenomenon_border(fig, ax_ph) -> None:
     """Draw the phenomenon band's red border as 4 filled bars.
 
     A stroked rectangle's corners rely on sub-pixel AA join coverage, which
@@ -501,7 +502,7 @@ def _dibujar_borde_fenomeno(fig, ax_ph) -> None:
         )
 
 
-def _panel_aviso(fig, texto, modo="area"):
+def _alert_panel(fig, text, mode="area"):
     """Render header band (title + logo) and phenomenon band per SMN template."""
     # ---- Header band: 1 module = 1/9 of figure height ----
     ax_hdr = fig.add_axes([0.0, HEADER_Y, 1.0, HEADER_H])
@@ -537,10 +538,10 @@ def _panel_aviso(fig, texto, modo="area"):
             ax_logo.axis("off")
             ax_logo.set_zorder(110)
         except Exception as exc:  # pylint: disable=broad-exception-caught
-            print(f"ATENCION: fallo cargando logo header: {exc}", file=sys.stderr)
+            print(f"WARNING: failed to load header logo: {exc}", file=sys.stderr)
     else:
         print(
-            f"ATENCION: logo header no encontrado en {HEADER_LOGO_PATH}",
+            f"WARNING: header logo not found at {HEADER_LOGO_PATH}",
             file=sys.stderr,
         )
 
@@ -578,7 +579,7 @@ def _panel_aviso(fig, texto, modo="area"):
         )
     )
 
-    _dibujar_borde_fenomeno(fig, ax_ph)
+    _draw_phenomenon_border(fig, ax_ph)
 
     ax_ph.text(
         0.02,
@@ -596,7 +597,7 @@ def _panel_aviso(fig, texto, modo="area"):
     ax_ph.text(
         0.5,
         0.30,
-        texto,
+        text,
         ha="center",
         va="center",
         fontsize=19,
@@ -607,54 +608,55 @@ def _panel_aviso(fig, texto, modo="area"):
     )
 
 
-def _agregar_capas_ign(ax: GeoAxes, modo: str = "area") -> None:
+def _add_ign_layers(ax: GeoAxes, mode: str = "area") -> None:
     """
-    Dibuja el mapa base IGN sobre el eje cartopy dado.
+    Draw the IGN base map on the given cartopy axes.
 
-    Orden de capas (zorder):
-      0  - fondo de agua (color de fondo del eje)
-      1  - países limítrofes (polígono relleno)
-      2  - provincias argentinas (polígono relleno blanco)
-      3  - límites Grupo B: interprovincial + costa (línea delgada)
-      4  - límites Grupo A: internacionales + lateral marítimo + lecho RdlP
-      5  - límites Grupo C: exterior Río de la Plata (línea punteada)
-      6  - límites Grupo D: sector antártico (línea especial)
+    Layer order (zorder):
+      0  - water background (axes background color)
+      1  - neighboring countries (filled polygon)
+      2  - Argentine provinces (white filled polygon)
+      3  - Group B borders: interprovincial + coastline (thin line)
+      4  - Group A borders: international + maritime lateral + Rio de la Plata bed
+      5  - Group C borders: outer Rio de la Plata (dotted line)
+      6  - Group D borders: Antarctic sector (special line)
 
-    El fondo de agua se logra seteando el facecolor del eje antes de llamar
-    a esta función.
+    The water background is achieved by setting the axes facecolor before
+    calling this function.
     """
     pc = ccrs.PlateCarree()
 
-    # Países limítrofes (polígono relleno + borde para mostrar fronteras entre
-    # países vecinos, que no están en limites.shp ya que ese solo contiene
-    # los límites de Argentina con sus vecinos, no los límites entre vecinos)
-    if _IGN["paises"]:
-        lw_paises = 0.8 if modo == "area" else 1.0
+    # Neighboring countries (filled polygon + border to show borders between
+    # neighboring countries, which are not in limites.shp since that only
+    # contains Argentina's borders with its neighbors, not the borders
+    # between neighbors)
+    if _IGN["countries"]:
+        lw_countries = 0.8 if mode == "area" else 1.0
         ax.add_geometries(
-            _IGN["paises"],
+            _IGN["countries"],
             crs=pc,
             facecolor="#bebebe",
             edgecolor="#888888",
-            linewidth=lw_paises,
+            linewidth=lw_countries,
             zorder=1,
         )
 
-    # Provincias argentinas — fondo blanco
-    if _IGN["provincias"]:
+    # Argentine provinces — white background
+    if _IGN["provinces"]:
         ax.add_geometries(
-            _IGN["provincias"],
+            _IGN["provinces"],
             crs=pc,
             facecolor="white",
             edgecolor="none",
             zorder=2,
         )
 
-    # Grupo B: Límite Interprovincial + Línea de costa
-    # Guía SMN (pedido Sebas): #656565, 1.5 px continua — más grueso que el
-    # interdepartamental para distinguirlo en provincias chicas (Jujuy, Tucumán)
-    if _IGN["grupo_b"]:
+    # Group B: Interprovincial border + coastline
+    # SMN guideline (requested by Sebas): #656565, 1.5 px solid — thicker than
+    # the interdepartmental one to distinguish it in small provinces (Jujuy, Tucumán)
+    if _IGN["group_b"]:
         ax.add_geometries(
-            _IGN["grupo_b"],
+            _IGN["group_b"],
             crs=pc,
             facecolor="none",
             edgecolor="#656565",
@@ -662,11 +664,11 @@ def _agregar_capas_ign(ax: GeoAxes, modo: str = "area") -> None:
             zorder=3,
         )
 
-    # Grupo A: Límite internacional + lecho RdlP + lateral marítimo arg-uru
-    # Guía SMN: #000000, 2 px, línea simple continua
-    if _IGN["grupo_a"]:
+    # Group A: International border + Rio de la Plata bed + arg-uru maritime lateral
+    # SMN guideline: #000000, 2 px, solid simple line
+    if _IGN["group_a"]:
         ax.add_geometries(
-            _IGN["grupo_a"],
+            _IGN["group_a"],
             crs=pc,
             facecolor="none",
             edgecolor="#000000",
@@ -674,10 +676,10 @@ def _agregar_capas_ign(ax: GeoAxes, modo: str = "area") -> None:
             zorder=4,
         )
 
-    # Grupo C: Límite exterior del Río de la Plata — línea punteada
-    if _IGN["grupo_c"]:
+    # Group C: Outer Rio de la Plata border — dotted line
+    if _IGN["group_c"]:
         ax.add_geometries(
-            _IGN["grupo_c"],
+            _IGN["group_c"],
             crs=pc,
             facecolor="none",
             edgecolor="#444444",
@@ -686,33 +688,33 @@ def _agregar_capas_ign(ax: GeoAxes, modo: str = "area") -> None:
             zorder=5,
         )
 
-    # Grupo D: Sector Antártico — línea punteada distintiva
-    if _IGN["grupo_d"]:
+    # Group D: Antarctic Sector — distinctive dotted line
+    if _IGN["group_d"]:
         ax.add_geometries(
-            _IGN["grupo_d"],
+            _IGN["group_d"],
             crs=pc,
             facecolor="none",
             edgecolor="#444444",
             linewidth=1.0,
-            linestyle=(0, (5, 3, 1, 3)),  # punto-guión
+            linestyle=(0, (5, 3, 1, 3)),  # dot-dash
             zorder=6,
         )
 
-    # Topónimos: etiquetas de pertenencia "(Arg.)" e islas
-    # Solo en modo 'gral' (mapa del país completo), ya que el modo 'area'
-    # hace zoom a la región afectada y no cubre las zonas de estas islas.
-    if modo == "gral" and _IGN.get("toponimos"):
-        for top in _IGN["toponimos"]:
-            lon, lat, nombre, tipo = top["lon"], top["lat"], top["nombre"], top["tipo"]
-            # Estilo según tipo:
-            #   'arg'      -> solo el texto "(Arg.)", negrita pequeña
-            #   'continen' -> "ISLAS MALVINAS (Arg.)" etc., itálica pequeña
-            #   'isla'     -> nombres de islas del Atlántico Sur, itálica muy pequeña
-            if tipo == "arg":
+    # Place labels: "(Arg.)" ownership tags and islands
+    # Only in 'gral' mode (full country map), since 'area' mode zooms into
+    # the affected region and does not cover these island areas.
+    if mode == "gral" and _IGN.get("place_labels"):
+        for top in _IGN["place_labels"]:
+            lon, lat, name, kind = top["lon"], top["lat"], top["nombre"], top["tipo"]
+            # Style depends on type:
+            #   'arg'      -> just the text "(Arg.)", small bold
+            #   'continen' -> "ISLAS MALVINAS (Arg.)" etc., small italic
+            #   'isla'     -> South Atlantic island names, very small italic
+            if kind == "arg":
                 ax.text(
                     lon,
                     lat,
-                    nombre,
+                    name,
                     transform=ccrs.PlateCarree(),
                     fontsize=6,
                     fontweight="bold",
@@ -722,11 +724,11 @@ def _agregar_capas_ign(ax: GeoAxes, modo: str = "area") -> None:
                     clip_on=True,
                     zorder=10,
                 )
-            elif tipo == "continen":
+            elif kind == "continen":
                 ax.text(
                     lon,
                     lat,
-                    nombre,
+                    name,
                     transform=ccrs.PlateCarree(),
                     fontsize=5.5,
                     fontstyle="italic",
@@ -736,11 +738,11 @@ def _agregar_capas_ign(ax: GeoAxes, modo: str = "area") -> None:
                     clip_on=True,
                     zorder=10,
                 )
-            elif tipo == "isla":
+            elif kind == "isla":
                 ax.text(
                     lon,
                     lat,
-                    nombre,
+                    name,
                     transform=ccrs.PlateCarree(),
                     fontsize=5,
                     fontstyle="italic",
@@ -757,7 +759,7 @@ def _agregar_capas_ign(ax: GeoAxes, modo: str = "area") -> None:
 # ---------------------------------------------------------------------------
 
 
-def generar_gif_area(  # pylint: disable=too-many-locals
+def generate_area_gif(  # pylint: disable=too-many-locals
     text,
     coords,
     departments,
@@ -770,34 +772,34 @@ def generar_gif_area(  # pylint: disable=too-many-locals
     """Generate zoomed-in area GIF showing affected region."""
     lats = [c[0] for c in coords]
     lons = [c[1] for c in coords]
-    # Padding más amplio para que el polígono no toque los bordes y quede
-    # espacio libre (especialmente abajo-derecha para el cuarterón).
+    # Wider padding so the polygon doesn't touch the edges, leaving
+    # free space (especially bottom-right for the corner inset).
     lat_s, lat_n = min(lats) - 1.8, max(lats) + 1.3
     lon_o, lon_e = min(lons) - 1.5, max(lons) + 2.5
 
     proj = ccrs.Mercator()
     fig = plt.figure(figsize=(13.75, 14), dpi=80)
-    # Margen blanco lateral (15.5% cada lado) para alojar el cuarterón.
-    # Sin margen vertical: mapa pegado al borde inferior y al fenómeno arriba.
+    # White lateral margin (15.5% each side) to fit the corner inset.
+    # No vertical margin: map flush with the bottom edge and the phenomenon on top.
     ax: GeoAxes = cast(
         GeoAxes,
         fig.add_axes((0.155, 0.0, 0.69, MAP_TOP), projection=proj),
     )
     ax.set_extent([lon_o, lon_e, lat_s, lat_n], crs=ccrs.PlateCarree())
-    ax.set_facecolor("#e1f1f4")  # color de agua de fondo
+    ax.set_facecolor("#e1f1f4")  # background water color
 
     try:
         ax.spines["geo"].set_visible(False)
     except KeyError:
         cast(Any, ax).outline_patch.set_visible(False)
 
-    # --- Mapa base IGN ---
-    _agregar_capas_ign(ax, modo="area")
+    # --- IGN base map ---
+    _add_ign_layers(ax, mode="area")
 
     # Department boundaries filtered to visible bbox
-    dept_vis = _dept_geoms_en_bbox(dept_index, lon_o, lon_e, lat_s, lat_n)
+    dept_vis = _dept_geoms_in_bbox(dept_index, lon_o, lon_e, lat_s, lat_n)
     if dept_vis:
-        # Guía SMN interdepartamental: #C4C4C4, 0.5 px, línea simple continua
+        # SMN interdepartmental guideline: #C4C4C4, 0.5 px, solid simple line
         ax.add_geometries(
             dept_vis,
             crs=ccrs.PlateCarree(),
@@ -810,7 +812,7 @@ def generar_gif_area(  # pylint: disable=too-many-locals
     # Province boundaries from alert cache (all, thicker line) — zorder 8
     # These are the prov_geoms from the dept/prov spatial index (GeoJSONs),
     # kept here as a second source in case IGN data is unavailable.
-    if prov_geoms and not _IGN["provincias"]:
+    if prov_geoms and not _IGN["provinces"]:
         ax.add_geometries(
             prov_geoms,
             crs=ccrs.PlateCarree(),
@@ -820,8 +822,8 @@ def generar_gif_area(  # pylint: disable=too-many-locals
             zorder=8,
         )
 
-    # Polygon (sombreado sólido + borde) — estilo igual al gral, alpha bajo
-    # para que los nombres de ciudades afectadas se lean por encima.
+    # Polygon (solid shading + border) — same style as gral, low alpha
+    # so the names of affected cities can be read on top.
     xy = list(zip(lons, lats))
     ax.add_patch(
         MplPolygon(
@@ -845,14 +847,14 @@ def generar_gif_area(  # pylint: disable=too-many-locals
         if not (lon_o <= lon <= lon_e and lat_s <= lat <= lat_n):
             continue
 
-        nom_depto = department["nom_departamento"]
+        dept_name = department["nom_departamento"]
         is_affected = (
             department["id_provincia"],
             department["id_localidad"],
         ) in affected_ids
 
         # CABA communes: skip individual dots, consolidate into single point after loop
-        if nom_depto.lower().startswith("comuna ") and nom_depto[7:].strip().isdigit():
+        if dept_name.lower().startswith("comuna ") and dept_name[7:].strip().isdigit():
             caba_visible = True
             if is_affected:
                 caba_affected = True
@@ -874,8 +876,8 @@ def generar_gif_area(  # pylint: disable=too-many-locals
             zorder=z_pt,
         )
 
-        etiqueta = _etiqueta_departamento(
-            nom_depto, department.get("provincia", ""), lon, lat
+        etiqueta = _department_label(
+            dept_name, department.get("province", ""), lon, lat
         )
         if etiqueta is not None:
             etiqueta = etiqueta.replace("General ", "Gral. ")
@@ -920,13 +922,13 @@ def generar_gif_area(  # pylint: disable=too-many-locals
             path_effects=[pe.withStroke(linewidth=2, foreground="white")],
         )
 
-    _agregar_marca_de_agua(fig)
+    _add_watermark(fig)
 
-    # Cuarterón inset — fijo bottom-right; el padding del extent garantiza
-    # espacio libre para que no pise el polígono.
-    _agregar_cuarteron(fig, anchor="br", margin_x=0.02, margin_y=0.02)
+    # Corner inset — fixed bottom-right; the extent padding guarantees
+    # free space so it doesn't overlap the polygon.
+    _add_inset(fig, anchor="br", margin_x=0.02, margin_y=0.02)
 
-    _panel_aviso(fig, text, modo="area")
+    _alert_panel(fig, text, mode="area")
 
     out = os.path.join(output_dir, f"aviso_{timestamp}.gif")
     tmp = out.replace(".gif", "_tmp.png")
@@ -942,7 +944,7 @@ def generar_gif_area(  # pylint: disable=too-many-locals
     return out
 
 
-def generar_gif_general(text, coords, timestamp, output_dir, dept_geoms, prov_geoms):
+def generate_general_gif(text, coords, timestamp, output_dir, dept_geoms, prov_geoms):
     """Generate country-wide GIF showing full Argentina with polygon."""
     lons = [c[1] for c in coords]
     lats = [c[0] for c in coords]
@@ -954,23 +956,23 @@ def generar_gif_general(text, coords, timestamp, output_dir, dept_geoms, prov_ge
         GeoAxes, fig_final.add_axes((0, 0.0, 1, MAP_TOP), projection=proj)
     )
 
-    # 2/3 superiores del país: cortamos el tercio sur (Tierra del Fuego/sur Santa Cruz).
-    # Rango lat original [-56, -21] (35°) → mantener 2/3 superiores ⇒ lat_s = -56 + 35/3 ≈ -44.33
+    # Top 2/3 of the country: we cut off the southern third (Tierra del Fuego/southern Santa Cruz).
+    # Original lat range [-56, -21] (35°) → keep top 2/3 ⇒ lat_s = -56 + 35/3 ≈ -44.33
     extent = [-78, -51, -46.33, -21]
 
     ax_map.set_extent(extent, crs=ccrs.PlateCarree())
-    ax_map.set_facecolor("#e1f1f4")  # color de agua de fondo
+    ax_map.set_facecolor("#e1f1f4")  # background water color
 
     try:
         ax_map.spines["geo"].set_visible(False)
     except KeyError:
         cast(Any, ax_map).outline_patch.set_visible(False)
 
-    # --- Mapa base IGN ---
-    _agregar_capas_ign(ax_map, modo="gral")
+    # --- IGN base map ---
+    _add_ign_layers(ax_map, mode="gral")
 
     # All department boundaries
-    # Guía SMN interdepartamental: #C4C4C4, 0.5 px, línea simple continua
+    # SMN interdepartmental guideline: #C4C4C4, 0.5 px, solid simple line
     if dept_geoms:
         ax_map.add_geometries(
             dept_geoms,
@@ -982,7 +984,7 @@ def generar_gif_general(text, coords, timestamp, output_dir, dept_geoms, prov_ge
         )
 
     # All province boundaries from alert cache — fallback only if IGN data unavailable
-    if prov_geoms and not _IGN["provincias"]:
+    if prov_geoms and not _IGN["provinces"]:
         ax_map.add_geometries(
             prov_geoms,
             crs=ccrs.PlateCarree(),
@@ -1006,13 +1008,13 @@ def generar_gif_general(text, coords, timestamp, output_dir, dept_geoms, prov_ge
         )
     )
 
-    _agregar_marca_de_agua(fig_final)
+    _add_watermark(fig_final)
 
-    # Cuarterón inset — bottom-right over water per template
-    # Sobre el océano (parte celeste) en el borde sur-este, no pegado al margen derecho.
-    _agregar_cuarteron(fig_final, anchor="br", margin_x=0.15, margin_y=0.015)
+    # Corner inset — bottom-right over water per template
+    # Over the ocean (light blue part) on the south-east edge, not flush with the right margin.
+    _add_inset(fig_final, anchor="br", margin_x=0.15, margin_y=0.015)
 
-    _panel_aviso(fig_final, text, modo="gral")
+    _alert_panel(fig_final, text, mode="gral")
 
     out = os.path.join(output_dir, f"avi_gral_{timestamp}.gif")
     tmp = out.replace(".gif", "_tmp.png")
@@ -1052,8 +1054,8 @@ def main():
         # Load IGN base-map cache (pre-built by scheduler at startup)
         global _IGN  # pylint: disable=global-statement
         if _IGN is None:
-            ign_cache = os.path.join(cache_dir, "ign_capas.pkl")
-            _IGN = _cargar_capas_ign(ign_cache)
+            ign_cache = os.path.join(cache_dir, "ign_layers.pkl")
+            _IGN = _load_ign_layers(ign_cache)
 
         # Load spatial indices (from payload cache or disk fallback)
         dept_index, dept_geoms_all, prov_geoms = _load_spatial_indices(
@@ -1070,7 +1072,7 @@ def main():
         coords = [(lon, lat) for lat, lon in coords_raw]  # swap to (lat, lon)
 
         # Generate GIFs
-        gif_area = generar_gif_area(
+        gif_area = generate_area_gif(
             phenomenon_text,
             coords,
             affected_departments,
@@ -1080,7 +1082,7 @@ def main():
             dept_index,
             prov_geoms,
         )
-        gif_gral = generar_gif_general(
+        gif_gral = generate_general_gif(
             phenomenon_text, coords, timestamp, output_dir, dept_geoms_all, prov_geoms
         )
 
