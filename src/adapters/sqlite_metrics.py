@@ -77,6 +77,7 @@ class SqliteAlertMetricsRepository(IAlertMetricsRepository):
         duration_ms: int,
         outcome: str,
         error_code: Optional[str],
+        error_message: Optional[str],
         affected_departments: Optional[int],
         intersection_ms: Optional[int],
         filter_ms: Optional[int],
@@ -93,6 +94,7 @@ class SqliteAlertMetricsRepository(IAlertMetricsRepository):
             duration_ms,
             outcome,
             error_code,
+            error_message,
             affected_departments,
             intersection_ms,
             filter_ms,
@@ -110,10 +112,10 @@ class SqliteAlertMetricsRepository(IAlertMetricsRepository):
             """
             INSERT INTO alert_jobs
                 (job_id, phenomenon_code, finished_at, duration_ms, outcome,
-                 error_code, affected_departments, intersection_ms, filter_ms,
-                 render_ms, persist_ms, polygon_vertices, gif_area_filename,
-                 gif_gral_filename)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 error_code, error_message, affected_departments, intersection_ms,
+                 filter_ms, render_ms, persist_ms, polygon_vertices,
+                 gif_area_filename, gif_gral_filename)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             row,
         )
@@ -261,8 +263,8 @@ class SqliteAlertMetricsRepository(IAlertMetricsRepository):
     def _get_recent_jobs_sync(self, since_iso: str, limit: int) -> List[JobRow]:
         sql = (
             "SELECT job_id, phenomenon_code, finished_at, duration_ms, outcome,"
-            " error_code, affected_departments, intersection_ms, filter_ms,"
-            " render_ms, persist_ms, polygon_vertices, gif_area_filename,"
+            " error_code, error_message, affected_departments, intersection_ms,"
+            " filter_ms, render_ms, persist_ms, polygon_vertices, gif_area_filename,"
             " gif_gral_filename FROM alert_jobs"
             " WHERE finished_at >= ? ORDER BY finished_at DESC"
         )
@@ -356,6 +358,7 @@ class SqliteAlertMetricsRepository(IAlertMetricsRepository):
             duration_ms=int(r["duration_ms"]),
             outcome=str(r["outcome"]),
             error_code=r["error_code"],
+            error_message=_opt_str("error_message"),
             affected_departments=_opt("affected_departments"),
             intersection_ms=_opt("intersection_ms"),
             filter_ms=_opt("filter_ms"),

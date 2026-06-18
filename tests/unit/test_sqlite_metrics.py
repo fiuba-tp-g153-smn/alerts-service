@@ -24,6 +24,7 @@ async def _job(repo: SqliteAlertMetricsRepository, **over) -> None:
         duration_ms=1000,
         outcome="done",
         error_code=None,
+        error_message=None,
         affected_departments=5,
         intersection_ms=40,
         filter_ms=20,
@@ -47,6 +48,7 @@ async def test_summary_counts_outcomes_and_failures(tmp_path):
             job_id="c",
             outcome="failed",
             error_code="area_too_large",
+            error_message="Affected-area HTML is 2443 characters, exceeds 2000.",
             duration_ms=500,
             intersection_ms=None,
             render_ms=None,
@@ -67,6 +69,10 @@ async def test_summary_counts_outcomes_and_failures(tmp_path):
         assert recent[0].persist_ms == 10
         assert recent[0].gif_area_filename == "aviso_260617100000.gif"
         assert recent[0].gif_gral_filename == "avi_gral_260617100000.gif"
+
+        recent_all = await repo.get_recent_jobs(_EPOCH, limit=10)
+        failed = next(r for r in recent_all if r.outcome == "failed")
+        assert failed.error_message == "Affected-area HTML is 2443 characters, exceeds 2000."
     finally:
         await repo.close()
 

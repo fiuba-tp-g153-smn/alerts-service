@@ -224,6 +224,7 @@ async def test_records_done_job_to_metrics():
         assert kwargs["polygon_vertices"] == 4  # GEOMETRY outer ring has 4 points
         assert kwargs["gif_area_filename"] == "aviso_260618100000.gif"
         assert kwargs["gif_gral_filename"] == "avi_gral_260618100000.gif"
+        assert kwargs["error_message"] is None  # done jobs carry no error
     finally:
         await proc.shutdown(drain=False, timeout=1)
 
@@ -242,6 +243,7 @@ async def test_records_failed_job_to_metrics():
         kwargs = recorder.record_job.await_args.kwargs
         assert kwargs["outcome"] == "failed"
         assert kwargs["error_code"] == "generation_failed"
+        assert kwargs["error_message"] == "boom"  # str(exc) persisted for the dashboard
         assert kwargs["intersection_ms"] is None
     finally:
         await proc.shutdown(drain=False, timeout=1)

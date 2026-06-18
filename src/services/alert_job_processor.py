@@ -180,6 +180,7 @@ class AlertJobProcessor:  # pylint: disable=too-many-instance-attributes
         started = time.perf_counter()
         result: Optional[dict] = None
         outcome, error_code = "failed", None
+        error_message: Optional[str] = None
         try:
             result = await asyncio.wait_for(
                 self._alert_service.generate_alert(
@@ -196,18 +197,19 @@ class AlertJobProcessor:  # pylint: disable=too-many-instance-attributes
                 self._job_timeout,
             )
             error_code = "timeout"
-            self._fail(
-                job.job_id, error_code, "Alert generation exceeded the time limit"
-            )
+            error_message = "Alert generation exceeded the time limit"
+            self._fail(job.job_id, error_code, error_message)
         except AreaTooLargeError as exc:
             error_code = "area_too_large"
-            self._fail(job.job_id, error_code, str(exc))
+            error_message = str(exc)
+            self._fail(job.job_id, error_code, error_message)
         except Exception as exc:  # pylint: disable=broad-exception-caught
             self._logger.error(
                 "Alert job %s failed: %s", job.job_id, exc, exc_info=True
             )
             error_code = "generation_failed"
-            self._fail(job.job_id, error_code, str(exc))
+            error_message = str(exc)
+            self._fail(job.job_id, error_code, error_message)
         else:
             outcome = "done"
             self._set_status(
@@ -219,7 +221,7 @@ class AlertJobProcessor:  # pylint: disable=too-many-instance-attributes
             self._done_total += 1
         else:
             self._failed_total += 1
-        await self._record_job(job, started, outcome, error_code, result)
+        await self._record_job(job, started, outcome, error_code, error_message, result)
 
     async def _record_job(  # pylint: disable=too-many-arguments
         self,
@@ -227,6 +229,7 @@ class AlertJobProcessor:  # pylint: disable=too-many-instance-attributes
         started: float,
         outcome: str,
         error_code: Optional[str],
+        error_message: Optional[str],
         result: Optional[dict],
     ) -> None:
         """Persist one terminal job to the metrics store (best-effort)."""
@@ -241,6 +244,7 @@ class AlertJobProcessor:  # pylint: disable=too-many-instance-attributes
                 duration_ms=int((time.perf_counter() - started) * 1000),
                 outcome=outcome,
                 error_code=error_code,
+                error_message=(error_message or "")[:2000] or None,
                 affected_departments=result.get("affected_departments_count"),
                 intersection_ms=result.get("intersection_ms"),
                 filter_ms=result.get("filter_ms"),

@@ -64,6 +64,7 @@ class FakeMetricsRepo:
                 polygon_vertices=10,
                 gif_area_filename="aviso_260617100000.gif",
                 gif_gral_filename="avi_gral_260617100000.gif",
+                error_message="Affected-area HTML is 2443 characters, exceeds 2000.",
             )
         ]
 
@@ -129,6 +130,7 @@ def test_jobs(client):
     assert body[0]["persist_ms"] == 10
     assert body[0]["gif_area_filename"] == "aviso_260617100000.gif"
     assert body[0]["gif_gral_filename"] == "avi_gral_260617100000.gif"
+    assert body[0]["error_message"] == "Affected-area HTML is 2443 characters, exceeds 2000."
 
 
 def test_jobs_history(client):

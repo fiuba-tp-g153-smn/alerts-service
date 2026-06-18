@@ -32,6 +32,7 @@ class IAlertMetricsRepository(ABC):
         duration_ms: int,
         outcome: str,
         error_code: Optional[str],
+        error_message: Optional[str],
         affected_departments: Optional[int],
         intersection_ms: Optional[int],
         filter_ms: Optional[int],
