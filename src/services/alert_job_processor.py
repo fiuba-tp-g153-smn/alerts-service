@@ -243,7 +243,9 @@ class AlertJobProcessor:  # pylint: disable=too-many-instance-attributes
                 error_code=error_code,
                 affected_departments=result.get("affected_departments_count"),
                 intersection_ms=result.get("intersection_ms"),
+                filter_ms=result.get("filter_ms"),
                 render_ms=result.get("render_ms"),
+                persist_ms=result.get("persist_ms"),
                 polygon_vertices=self._polygon_vertices(job.geometry),
             )
         except Exception as exc:  # pylint: disable=broad-exception-caught

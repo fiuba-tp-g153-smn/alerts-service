@@ -5,7 +5,7 @@ from typing import Dict, Optional
 
 
 @dataclass(frozen=True, slots=True)
-class JobRow:
+class JobRow:  # pylint: disable=too-many-instance-attributes
     """One terminal alert-generation job persisted in ``alert_jobs``."""
 
     job_id: str
@@ -16,7 +16,9 @@ class JobRow:
     error_code: Optional[str] = None
     affected_departments: Optional[int] = None
     intersection_ms: Optional[int] = None
+    filter_ms: Optional[int] = None
     render_ms: Optional[int] = None
+    persist_ms: Optional[int] = None
     polygon_vertices: Optional[int] = None
 
 
@@ -55,4 +57,6 @@ class JobsAggregate:
     avg_duration_ms: float = 0.0
     p95_duration_ms: int = 0
     avg_intersection_ms: float = 0.0
+    avg_filter_ms: float = 0.0
     avg_render_ms: float = 0.0
+    avg_persist_ms: float = 0.0

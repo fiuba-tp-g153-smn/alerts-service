@@ -34,7 +34,9 @@ class IAlertMetricsRepository(ABC):
         error_code: Optional[str],
         affected_departments: Optional[int],
         intersection_ms: Optional[int],
+        filter_ms: Optional[int],
         render_ms: Optional[int],
+        persist_ms: Optional[int],
         polygon_vertices: Optional[int],
     ) -> None:
         """Append one terminal alert-generation job."""

@@ -3,13 +3,20 @@
 import pytest
 from fastapi.testclient import TestClient
 
-from container import get_history_repo, get_metrics_repo
+from container import get_history_repo, get_metrics_repo, get_mysql_repo
 from domain.metrics import (
     JobHistoryBucket,
     JobRow,
     JobsAggregate,
     ProcessorSampleRow,
 )
+
+
+class FakeMysqlRepo:
+    """Minimal fake exposing the pending-count query used by /metrics/summary."""
+
+    def get_pending_alerts_etag(self):
+        return (7, 42)  # live pending count = 7
 
 
 class FakeMetricsRepo:
@@ -24,7 +31,9 @@ class FakeMetricsRepo:
             avg_duration_ms=1500.0,
             p95_duration_ms=3000,
             avg_intersection_ms=40.0,
+            avg_filter_ms=20.0,
             avg_render_ms=900.0,
+            avg_persist_ms=10.0,
         )
 
     async def get_latest_sample(self):
@@ -49,7 +58,9 @@ class FakeMetricsRepo:
                 outcome="done",
                 affected_departments=5,
                 intersection_ms=40,
+                filter_ms=20,
                 render_ms=900,
+                persist_ms=10,
                 polygon_vertices=10,
             )
         ]
@@ -85,9 +96,11 @@ def client():
 
     app.dependency_overrides[get_metrics_repo] = FakeMetricsRepo
     app.dependency_overrides[get_history_repo] = FakeHistoryRepo
+    app.dependency_overrides[get_mysql_repo] = FakeMysqlRepo
     yield TestClient(app)
     app.dependency_overrides.pop(get_metrics_repo, None)
     app.dependency_overrides.pop(get_history_repo, None)
+    app.dependency_overrides.pop(get_mysql_repo, None)
 
 
 def test_summary(client):
@@ -97,7 +110,10 @@ def test_summary(client):
     assert body["window_hours"] == 24
     assert body["jobs"]["total"] == 3
     assert body["jobs"]["failure_breakdown"] == {"timeout": 1}
-    assert body["processor"]["pending_alerts"] == 4
+    assert body["jobs"]["avg_filter_ms"] == 20.0
+    assert body["jobs"]["avg_persist_ms"] == 10.0
+    # Live pending (7 from the mysql fake), NOT the sampled value (4).
+    assert body["processor"]["pending_alerts"] == 7
 
 
 def test_jobs(client):
@@ -107,6 +123,8 @@ def test_jobs(client):
     assert len(body) == 1
     assert body[0]["outcome"] == "done"
     assert body[0]["polygon_vertices"] == 10
+    assert body[0]["filter_ms"] == 20
+    assert body[0]["persist_ms"] == 10
 
 
 def test_jobs_history(client):

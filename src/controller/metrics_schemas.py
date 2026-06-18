@@ -15,7 +15,9 @@ class JobsAggregate(BaseModel):
     avg_duration_ms: float
     p95_duration_ms: int
     avg_intersection_ms: float
+    avg_filter_ms: float
     avg_render_ms: float
+    avg_persist_ms: float
 
 
 class ProcessorStats(BaseModel):
@@ -50,7 +52,9 @@ class JobMetric(BaseModel):
     error_code: Optional[str] = None
     affected_departments: Optional[int] = None
     intersection_ms: Optional[int] = None
+    filter_ms: Optional[int] = None
     render_ms: Optional[int] = None
+    persist_ms: Optional[int] = None
     polygon_vertices: Optional[int] = None
 
 

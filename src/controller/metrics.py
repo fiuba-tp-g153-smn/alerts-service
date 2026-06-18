@@ -7,7 +7,7 @@ from typing import List
 
 from fastapi import APIRouter, Depends, Query
 
-from container import get_history_repo, get_metrics_repo
+from container import get_history_repo, get_metrics_repo, get_mysql_repo
 from controller.metrics_schemas import (
     JobHistoryPoint,
     JobMetric,
@@ -19,6 +19,7 @@ from controller.metrics_schemas import (
 )
 from ports.history_repository import IHistoryRepository
 from ports.metrics_repository import IAlertMetricsRepository
+from ports.mysql_repository import IMySQLRepository
 
 router = APIRouter(prefix="/metrics", tags=["Metrics"])
 
@@ -41,12 +42,17 @@ def _since_iso(hours: int) -> str:
 async def get_summary(
     hours: int = Query(24, ge=0, description="Window in hours (0 = all time)"),
     metrics: IAlertMetricsRepository = Depends(get_metrics_repo),
+    mysql_repo: IMySQLRepository = Depends(get_mysql_repo),
 ) -> MetricsSummary:
-    """Windowed job aggregates (totals, failure breakdown, durations) plus the
-    most recent processor snapshot (queue depth, workers, pending alerts)."""
+    """Windowed job aggregates (totals, failure breakdown, per-stage durations)
+    plus the latest processor snapshot. ``pending_alerts`` is read live (not from
+    the periodic sample) so it is always current."""
     agg = await metrics.get_summary(_since_iso(hours))
     latest = await metrics.get_latest_sample()
     processor = ProcessorStats(**asdict(latest)) if latest else ProcessorStats()
+    # Live pending count (the sampled value can be up to one interval stale).
+    pending, _ = await asyncio.to_thread(mysql_repo.get_pending_alerts_etag)
+    processor = processor.model_copy(update={"pending_alerts": int(pending)})
     return MetricsSummary(
         window_hours=hours, jobs=JobsAggregate(**asdict(agg)), processor=processor
     )

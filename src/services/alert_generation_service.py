@@ -125,10 +125,12 @@ class AlertGenerationService:  # pylint: disable=too-few-public-methods
 
         # 3. Filter departments spatially (DB read off the event loop so a MySQL
         # stall can never block the loop / freeze the whole service).
+        t_filter = time.perf_counter()
         all_departments = await asyncio.to_thread(self.mysql_repo.get_departments)
         affected_departments = await self._filter_departments_by_departments(
             geometry, departments, all_departments
         )
+        filter_ms = int((time.perf_counter() - t_filter) * 1000)
 
         self.logger.info(
             f"Found {len(departments)} intersecting departments, "
@@ -160,6 +162,7 @@ class AlertGenerationService:  # pylint: disable=too-few-public-methods
         # 5b. Validate area HTML against the DB column limit before insert, so an
         # oversized affected area becomes an actionable error instead of a raw
         # MySQL DataError. Only knowable now (depends on the intersection result).
+        t_persist = time.perf_counter()
         await self._validate_area_size(area_html, len(affected_departments))
 
         # Extract just the filename from full path (persisted in DB and used for URL)
@@ -175,6 +178,7 @@ class AlertGenerationService:  # pylint: disable=too-few-public-methods
             gif_general=gif_gral_filename,
             gif_zoom=gif_area_filename,
         )
+        persist_ms = int((time.perf_counter() - t_persist) * 1000)
 
         duration = time.perf_counter() - t0
         self.logger.info(f"Alert {alert_id} generated in {duration:.2f}s")
@@ -190,7 +194,9 @@ class AlertGenerationService:  # pylint: disable=too-few-public-methods
             "gif_gral_url": f"/alerts/{gif_gral_filename}",
             "affected_departments_count": len(affected_departments),
             "intersection_ms": intersection_ms,
+            "filter_ms": filter_ms,
             "render_ms": render_ms,
+            "persist_ms": persist_ms,
         }
 
     async def _filter_departments_by_departments(  # pylint: disable=too-many-locals

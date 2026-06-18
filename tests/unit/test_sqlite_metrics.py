@@ -26,7 +26,9 @@ async def _job(repo: SqliteAlertMetricsRepository, **over) -> None:
         error_code=None,
         affected_departments=5,
         intersection_ms=40,
+        filter_ms=20,
         render_ms=900,
+        persist_ms=10,
         polygon_vertices=10,
     )
     payload.update(over)
@@ -55,6 +57,12 @@ async def test_summary_counts_outcomes_and_failures(tmp_path):
         assert agg.failure_breakdown == {"area_too_large": 1}
         assert agg.avg_duration_ms == 2000.0  # mean of done durations (1000, 3000)
         assert agg.p95_duration_ms == 3000
+        assert agg.avg_filter_ms == 20.0  # both done jobs default filter_ms=20
+        assert agg.avg_persist_ms == 10.0
+
+        recent = await repo.get_recent_jobs(_EPOCH, limit=1)
+        assert recent[0].filter_ms == 20
+        assert recent[0].persist_ms == 10
     finally:
         await repo.close()
 

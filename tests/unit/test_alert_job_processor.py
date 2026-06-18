@@ -197,7 +197,9 @@ async def test_records_done_job_to_metrics():
             "alert_id": 9,
             "affected_departments_count": 7,
             "intersection_ms": 40,
+            "filter_ms": 20,
             "render_ms": 800,
+            "persist_ms": 15,
         }
     )
     recorder = MagicMock()
@@ -215,6 +217,8 @@ async def test_records_done_job_to_metrics():
         assert kwargs["phenomenon_code"] == 3
         assert kwargs["affected_departments"] == 7
         assert kwargs["intersection_ms"] == 40
+        assert kwargs["filter_ms"] == 20
+        assert kwargs["persist_ms"] == 15
         assert kwargs["polygon_vertices"] == 4  # GEOMETRY outer ring has 4 points
     finally:
         await proc.shutdown(drain=False, timeout=1)

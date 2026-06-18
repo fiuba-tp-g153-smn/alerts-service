@@ -79,7 +79,9 @@ class SqliteAlertMetricsRepository(IAlertMetricsRepository):
         error_code: Optional[str],
         affected_departments: Optional[int],
         intersection_ms: Optional[int],
+        filter_ms: Optional[int],
         render_ms: Optional[int],
+        persist_ms: Optional[int],
         polygon_vertices: Optional[int],
     ) -> None:
         row = (
@@ -91,7 +93,9 @@ class SqliteAlertMetricsRepository(IAlertMetricsRepository):
             error_code,
             affected_departments,
             intersection_ms,
+            filter_ms,
             render_ms,
+            persist_ms,
             polygon_vertices,
         )
         async with self._access_lock:
@@ -102,9 +106,9 @@ class SqliteAlertMetricsRepository(IAlertMetricsRepository):
             """
             INSERT INTO alert_jobs
                 (job_id, phenomenon_code, finished_at, duration_ms, outcome,
-                 error_code, affected_departments, intersection_ms, render_ms,
-                 polygon_vertices)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 error_code, affected_departments, intersection_ms, filter_ms,
+                 render_ms, persist_ms, polygon_vertices)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             row,
         )
@@ -209,8 +213,8 @@ class SqliteAlertMetricsRepository(IAlertMetricsRepository):
         }
         agg = conn.execute(
             "SELECT AVG(duration_ms) AS d, AVG(intersection_ms) AS i,"
-            " AVG(render_ms) AS r FROM alert_jobs"
-            " WHERE outcome = 'done' AND finished_at >= ?",
+            " AVG(filter_ms) AS f, AVG(render_ms) AS r, AVG(persist_ms) AS p"
+            " FROM alert_jobs WHERE outcome = 'done' AND finished_at >= ?",
             (since_iso,),
         ).fetchone()
         return JobsAggregate(
@@ -221,7 +225,9 @@ class SqliteAlertMetricsRepository(IAlertMetricsRepository):
             avg_duration_ms=float(agg["d"] or 0.0),
             p95_duration_ms=self._p95_done_duration(conn, since_iso),
             avg_intersection_ms=float(agg["i"] or 0.0),
+            avg_filter_ms=float(agg["f"] or 0.0),
             avg_render_ms=float(agg["r"] or 0.0),
+            avg_persist_ms=float(agg["p"] or 0.0),
         )
 
     @staticmethod
@@ -250,9 +256,9 @@ class SqliteAlertMetricsRepository(IAlertMetricsRepository):
     def _get_recent_jobs_sync(self, since_iso: str, limit: int) -> List[JobRow]:
         sql = (
             "SELECT job_id, phenomenon_code, finished_at, duration_ms, outcome,"
-            " error_code, affected_departments, intersection_ms, render_ms,"
-            " polygon_vertices FROM alert_jobs WHERE finished_at >= ?"
-            " ORDER BY finished_at DESC"
+            " error_code, affected_departments, intersection_ms, filter_ms,"
+            " render_ms, persist_ms, polygon_vertices FROM alert_jobs"
+            " WHERE finished_at >= ? ORDER BY finished_at DESC"
         )
         params: list = [since_iso]
         if limit > 0:
@@ -342,7 +348,9 @@ class SqliteAlertMetricsRepository(IAlertMetricsRepository):
             error_code=r["error_code"],
             affected_departments=_opt("affected_departments"),
             intersection_ms=_opt("intersection_ms"),
+            filter_ms=_opt("filter_ms"),
             render_ms=_opt("render_ms"),
+            persist_ms=_opt("persist_ms"),
             polygon_vertices=_opt("polygon_vertices"),
         )
 
