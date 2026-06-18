@@ -107,8 +107,9 @@ class AlertGenerationService:  # pylint: disable=too-few-public-methods
         self.logger.info(f"Calculating intersections for phenomenon {phenomenon_code}")
         departments = await self.geo_service.intersect_departments(geometry)
 
-        # 3. Filter departments spatially
-        all_departments = self.mysql_repo.get_departments()
+        # 3. Filter departments spatially (DB read off the event loop so a MySQL
+        # stall can never block the loop / freeze the whole service).
+        all_departments = await asyncio.to_thread(self.mysql_repo.get_departments)
         affected_departments = await self._filter_departments_by_departments(
             geometry, departments, all_departments
         )
@@ -147,7 +148,9 @@ class AlertGenerationService:  # pylint: disable=too-few-public-methods
         gif_area_filename = os.path.basename(worker_result["gif_area"])
         gif_gral_filename = os.path.basename(worker_result["gif_gral"])
 
-        alert_id = self.mysql_repo.insert_alert(
+        # DB write off the event loop (see get_departments above).
+        alert_id = await asyncio.to_thread(
+            self.mysql_repo.insert_alert,
             phenomenon_text,
             area_html,
             polygon_str,
@@ -344,6 +347,11 @@ class AlertGenerationService:  # pylint: disable=too-few-public-methods
                 proc.kill()
                 await proc.wait()
                 raise RuntimeError("Visualization worker timed out after 120s") from exc
+            except asyncio.CancelledError:
+                # Outer cancel (per-job timeout or shutdown): never orphan the child.
+                proc.kill()
+                await proc.wait()
+                raise
 
         if proc.returncode != 0:
             self.logger.error(f"Worker failed: {stderr_bytes.decode()}")

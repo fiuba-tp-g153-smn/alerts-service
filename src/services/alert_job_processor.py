@@ -14,8 +14,12 @@ from services.alert_generation_service import AlertGenerationService
 # long-running process; oldest terminal records are evicted first.
 _REGISTRY_CAP = 256
 
+# Safety valve for the worker supervisor: stop respawning a slot that keeps
+# dying so a hopelessly-broken worker can't spin forever.
+_MAX_RESPAWNS = 10
 
-class AlertJobProcessor:
+
+class AlertJobProcessor:  # pylint: disable=too-many-instance-attributes
     """Runs alert generation off the request path via a bounded queue.
 
     POST /alerts enqueues a job and returns immediately; a small pool of worker
@@ -30,24 +34,33 @@ class AlertJobProcessor:
         logger: Logger,
         maxsize: int,
         workers: int,
+        job_timeout: float = 150.0,
+        supervisor_interval: float = 30.0,
     ):
         """Initialize with the alert service, logger and queue/pool sizing."""
         self._alert_service = alert_service
         self._logger = logger
         self._num_workers = workers
+        self._job_timeout = job_timeout
+        self._supervisor_interval = supervisor_interval
         self._queue: asyncio.Queue[AlertJob] = asyncio.Queue(maxsize=maxsize)
         self._registry: "OrderedDict[str, AlertJobRecord]" = OrderedDict()
         self._workers: list[asyncio.Task] = []
+        self._supervisor: Optional[asyncio.Task] = None
+        self._respawns = 0
         self._closing = False
 
     def start(self) -> None:
-        """Spawn the worker tasks (idempotent)."""
+        """Spawn the worker tasks and the health supervisor (idempotent)."""
         if self._workers:
             return
         self._workers = [
             asyncio.create_task(self._worker_loop(), name=f"alert-worker-{i}")
             for i in range(self._num_workers)
         ]
+        self._supervisor = asyncio.create_task(
+            self._supervisor_loop(), name="alert-worker-supervisor"
+        )
         self._logger.info(
             "AlertJobProcessor started with %d workers", self._num_workers
         )
@@ -75,6 +88,11 @@ class AlertJobProcessor:
     async def shutdown(self, drain: bool = True, timeout: float = 130.0) -> None:
         """Stop accepting work, optionally drain in-flight jobs, then stop workers."""
         self._closing = True
+        # Stop the supervisor first, so it can't respawn a worker we then cancel.
+        if self._supervisor is not None:
+            self._supervisor.cancel()
+            await asyncio.gather(self._supervisor, return_exceptions=True)
+            self._supervisor = None
         if drain and self._workers:
             try:
                 await asyncio.wait_for(self._queue.join(), timeout=timeout)
@@ -98,12 +116,60 @@ class AlertJobProcessor:
             finally:
                 self._queue.task_done()
 
+    async def _supervisor_loop(self) -> None:
+        """Periodically respawn workers that died unexpectedly (self-healing)."""
+        while not self._closing:
+            await asyncio.sleep(self._supervisor_interval)
+            if self._closing:
+                break
+            self._respawn_dead_workers()
+
+    def _respawn_dead_workers(self) -> None:
+        """Replace any finished worker task so the pool stays at full strength."""
+        for i, task in enumerate(self._workers):
+            if not task.done() or self._closing:
+                continue
+            self._log_dead_worker(task, i)
+            if self._respawns >= _MAX_RESPAWNS:
+                self._logger.critical(
+                    "Alert worker respawn cap (%d) reached — pool degraded",
+                    _MAX_RESPAWNS,
+                )
+                continue
+            self._respawns += 1
+            self._workers[i] = asyncio.create_task(
+                self._worker_loop(), name=f"alert-worker-{i}"
+            )
+            self._logger.warning("Respawned dead alert worker %d", i)
+
+    def _log_dead_worker(self, task: asyncio.Task, index: int) -> None:
+        """Retrieve and log a dead worker's exception (avoids 'never retrieved')."""
+        if task.cancelled():
+            return
+        exc = task.exception()
+        if exc is not None:
+            self._logger.error("Alert worker %d died: %s", index, exc, exc_info=exc)
+
     async def _process(self, job: AlertJob) -> None:
         """Generate one alert and record its outcome (never raises)."""
         self._set_status(job.job_id, AlertJobRecord(JobStatus.PROCESSING))
         try:
-            result = await self._alert_service.generate_alert(
-                job.geometry, job.phenomenon_code, phenomenon_text=job.phenomenon_text
+            result = await asyncio.wait_for(
+                self._alert_service.generate_alert(
+                    job.geometry,
+                    job.phenomenon_code,
+                    phenomenon_text=job.phenomenon_text,
+                ),
+                timeout=self._job_timeout,
+            )
+        except asyncio.TimeoutError:
+            self._logger.error(
+                "Alert job %s exceeded %.0fs and was cancelled",
+                job.job_id,
+                self._job_timeout,
+            )
+            self._fail(
+                job.job_id, "timeout", "Alert generation exceeded the time limit"
             )
         except AreaTooLargeError as exc:
             self._fail(job.job_id, "area_too_large", str(exc))

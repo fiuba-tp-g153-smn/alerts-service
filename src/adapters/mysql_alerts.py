@@ -6,6 +6,10 @@ from mysql.connector import pooling
 
 from ports.mysql_repository import IMySQLRepository
 
+# Bounds how long acquiring/establishing a connection may block, so a dead DB
+# fails fast (on a worker thread) instead of hanging indefinitely.
+_CONNECTION_TIMEOUT_SECONDS = 30
+
 # Weather phenomenon codes and descriptions (from genero_aviso.py)
 PHENOMENA = {
     1: "TORMENTAS FUERTES CON RAFAGAS.",
@@ -52,6 +56,7 @@ class MySQLAlertsRepository(IMySQLRepository):
             database=database,
             user=user,
             password=password,
+            connection_timeout=_CONNECTION_TIMEOUT_SECONDS,
         )
 
     def get_departments(self) -> List[dict]:

@@ -54,6 +54,8 @@ async def lifespan(_app: FastAPI):
         logger,
         maxsize=settings.alert_job_queue_maxsize,
         workers=settings.alert_job_workers,
+        job_timeout=settings.alert_job_timeout_seconds,
+        supervisor_interval=settings.alert_supervisor_interval_seconds,
     )
     processor.start()
     _app.state.alert_job_processor = processor

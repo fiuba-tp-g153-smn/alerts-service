@@ -83,6 +83,75 @@ async def test_generic_error_marks_failed_generation():
         await proc.shutdown(drain=False, timeout=1)
 
 
+async def test_job_timeout_marks_failed_and_worker_survives():
+    calls = {"n": 0}
+
+    async def generate(*_args, **_kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            await asyncio.Event().wait()  # first job hangs forever
+        return {"alert_id": 5}
+
+    service = MagicMock()
+    service.generate_alert = generate
+    proc = AlertJobProcessor(service, logging.getLogger("test"), 16, 1, job_timeout=0.1)
+    proc.start()
+    try:
+        first = proc.try_submit(GEOMETRY, 1, "TORMENTAS")
+        record = await _wait_terminal(proc, first)
+        assert record.status is JobStatus.FAILED
+        assert record.error_code == "timeout"
+
+        # The hung job was cancelled and the worker is free for the next one.
+        second = proc.try_submit(GEOMETRY, 1, "TORMENTAS")
+        record2 = await _wait_terminal(proc, second)
+        assert record2.status is JobStatus.DONE
+        assert record2.alert_id == 5
+    finally:
+        await proc.shutdown(drain=False, timeout=1)
+
+
+async def test_supervisor_respawns_dead_worker():
+    service = _make_service(return_value={"alert_id": 8})
+    proc = AlertJobProcessor(
+        service, logging.getLogger("test"), 16, 1, supervisor_interval=0.05
+    )
+    proc.start()
+    try:
+        # Simulate an unexpected worker death.
+        proc._workers[0].cancel()
+
+        async with asyncio.timeout(2):
+            while proc._respawns < 1:
+                await asyncio.sleep(0.02)
+
+        # The respawned worker drains a freshly submitted job.
+        job_id = proc.try_submit(GEOMETRY, 1, "TORMENTAS")
+        record = await _wait_terminal(proc, job_id)
+        assert record.status is JobStatus.DONE
+        assert record.alert_id == 8
+    finally:
+        await proc.shutdown(drain=False, timeout=1)
+
+
+async def test_shutdown_stops_supervisor():
+    proc = AlertJobProcessor(
+        _make_service(return_value={"alert_id": 1}),
+        logging.getLogger("test"),
+        16,
+        1,
+        supervisor_interval=0.05,
+    )
+    proc.start()
+    supervisor = proc._supervisor
+    assert supervisor is not None
+
+    await proc.shutdown(drain=False, timeout=1)
+
+    assert proc._supervisor is None
+    assert supervisor.done()
+
+
 async def test_try_submit_returns_none_when_queue_full():
     service = _make_service(return_value={"alert_id": 1})
     # No workers, maxsize 1: first submission fills the queue, second is rejected.

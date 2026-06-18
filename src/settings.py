@@ -67,7 +67,9 @@ class Settings:  # pylint: disable=too-many-instance-attributes,too-few-public-m
     # Asynchronous alert generation (background worker pool)
     alert_job_workers: int = 2
     alert_job_queue_maxsize: int = 16
-    alert_job_shutdown_seconds: float = 130.0
+    alert_job_timeout_seconds: float = 150.0
+    alert_supervisor_interval_seconds: float = 30.0
+    alert_job_shutdown_seconds: float = 160.0
 
     def __init__(self):
         self._load_from_env()
@@ -91,8 +93,14 @@ class Settings:  # pylint: disable=too-many-instance-attributes,too-few-public-m
         self.alert_detail_level = int(data.get("alert_detail_level", 7))
         self.alert_job_workers = int(data.get("alert_job_workers", 2))
         self.alert_job_queue_maxsize = int(data.get("alert_job_queue_maxsize", 16))
+        self.alert_job_timeout_seconds = float(
+            data.get("alert_job_timeout_seconds", 150.0)
+        )
+        self.alert_supervisor_interval_seconds = float(
+            data.get("alert_supervisor_interval_seconds", 30.0)
+        )
         self.alert_job_shutdown_seconds = float(
-            data.get("alert_job_shutdown_seconds", 130.0)
+            data.get("alert_job_shutdown_seconds", 160.0)
         )
 
     def _load_from_env(self) -> None:
@@ -164,6 +172,11 @@ class Settings:  # pylint: disable=too-many-instance-attributes,too-few-public-m
         logger.info("ALERT_DETAIL_LEVEL: %s", self.alert_detail_level)
         logger.info("ALERT_JOB_WORKERS: %s", self.alert_job_workers)
         logger.info("ALERT_JOB_QUEUE_MAXSIZE: %s", self.alert_job_queue_maxsize)
+        logger.info("ALERT_JOB_TIMEOUT_SECONDS: %s", self.alert_job_timeout_seconds)
+        logger.info(
+            "ALERT_SUPERVISOR_INTERVAL_SECONDS: %s",
+            self.alert_supervisor_interval_seconds,
+        )
         logger.info("ALERT_JOB_SHUTDOWN_SECONDS: %s", self.alert_job_shutdown_seconds)
         logger.info("MYSQL_TAVISO_HOST: %s", self.mysql_taviso_host)
         logger.info("MYSQL_TAVISO_DATABASE: %s", self.mysql_taviso_database)
