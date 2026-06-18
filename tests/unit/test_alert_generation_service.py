@@ -3,10 +3,24 @@
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from shapely.geometry import Polygon
 
+import services.alert_generation_service as svc_mod
 from domain.alert_job import PreparedAlert
 from domain.models import AreaTooLargeError, PolygonTooLargeError
 from services.alert_generation_service import AlertGenerationService
+
+_POLY = Polygon([(-58.5, -34.6), (-58.4, -34.6), (-58.4, -34.5), (-58.5, -34.6)])
+
+
+@pytest.fixture(autouse=True)
+def _reset_merc_caches():
+    """Mercator projection caches are module globals — reset around each test."""
+    svc_mod._DEPT_INDEX_MERC_CACHE = None
+    svc_mod._PROV_GEOMS_MERC_CACHE = None
+    yield
+    svc_mod._DEPT_INDEX_MERC_CACHE = None
+    svc_mod._PROV_GEOMS_MERC_CACHE = None
 
 GEOMETRY = {
     "type": "Polygon",
@@ -118,3 +132,30 @@ async def test_generate_alert_raises_when_area_too_large(service):
 
     assert exc_info.value.affected_count == 2
     service.mysql_repo.insert_alert.assert_not_called()
+
+
+def test_project_index_to_mercator_keeps_bbox_and_uses_metres():
+    bbox = _POLY.bounds
+    out = AlertGenerationService._project_index_to_mercator([(bbox, _POLY)])
+    assert len(out) == 1
+    out_bbox, out_geom = out[0]
+    assert out_bbox == bbox  # bbox stays lon/lat (used for the extent prefilter)
+    # Mercator coords are in metres → magnitudes far beyond the lon/lat range.
+    minx, _miny, _maxx, _maxy = out_geom.bounds
+    assert abs(minx) > 1_000_000
+
+
+async def test_get_dept_index_merc_projects_once_and_caches():
+    index = [(_POLY.bounds, _POLY)]
+    first = await AlertGenerationService._get_dept_index_merc(index)
+    # Second call with different input returns the cached result (not re-projected).
+    second = await AlertGenerationService._get_dept_index_merc([])
+    assert first is second
+    assert len(first) == 1
+
+
+async def test_prewarm_render_geometry_is_best_effort(service, tmp_path):
+    # No cache pickles on disk → indexes load as None → projects [] → never raises.
+    service.settings.alert_cache_dir = str(tmp_path)
+    await service.prewarm_render_geometry()
+    assert svc_mod._DEPT_INDEX_MERC_CACHE == []

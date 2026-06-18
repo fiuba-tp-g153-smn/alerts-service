@@ -47,6 +47,11 @@ async def lifespan(_app: FastAPI):
 
     scheduler.start()
 
+    # Pre-warm the render geometry (project dept/prov index to Mercator) now that
+    # the scheduler built the caches, so the first alert isn't slowed by it and no
+    # cartopy runs in the main process mid-request. Best-effort (swallows errors).
+    await get_singleton_alert_service().prewarm_render_geometry()
+
     geo_repo = get_geo_repo()
     geo_repo.start_eviction_loop()
 

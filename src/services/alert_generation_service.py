@@ -10,6 +10,7 @@ from datetime import datetime
 from logging import Logger
 from typing import List
 
+import cartopy.crs as ccrs
 from shapely import wkb as shapely_wkb
 from shapely.geometry import Point, shape
 
@@ -49,6 +50,16 @@ _DEPT_INDEX_LOCK = asyncio.Lock()
 
 _PROV_INDEX_CACHE: list | None = None
 _PROV_INDEX_LOCK = asyncio.Lock()
+
+# Mercator-projected copies of dept_index/prov_index geometries, for rendering only
+# (the lon/lat versions above stay in PlateCarree for spatial filtering). Computed
+# once on first use and cached — pre-projecting avoids cartopy's expensive per-request
+# trace-based reprojection (~2s/render for ~53k vertices) in the worker.
+_DEPT_INDEX_MERC_CACHE: list | None = None
+_DEPT_INDEX_MERC_LOCK = asyncio.Lock()
+
+_PROV_GEOMS_MERC_CACHE: list | None = None
+_PROV_GEOMS_MERC_LOCK = asyncio.Lock()
 
 
 class AlertGenerationService:  # pylint: disable=too-few-public-methods
@@ -282,6 +293,48 @@ class AlertGenerationService:  # pylint: disable=too-few-public-methods
         return _PROV_INDEX_CACHE
 
     @staticmethod
+    async def _get_dept_index_merc(dept_index: list) -> list:
+        """Return dept_index with geometries pre-projected to ccrs.Mercator().
+
+        Bounding boxes (lon/lat) are kept as-is — they only prefilter by visible
+        extent, which is also expressed in lon/lat. Computed once and cached for the
+        app lifetime.
+        """
+        global _DEPT_INDEX_MERC_CACHE  # pylint: disable=global-statement
+        if _DEPT_INDEX_MERC_CACHE is None:
+            async with _DEPT_INDEX_MERC_LOCK:
+                if _DEPT_INDEX_MERC_CACHE is None:
+                    _DEPT_INDEX_MERC_CACHE = await asyncio.to_thread(
+                        AlertGenerationService._project_index_to_mercator, dept_index
+                    )
+        return _DEPT_INDEX_MERC_CACHE
+
+    @staticmethod
+    async def _get_prov_geoms_merc(prov_index: list) -> list:
+        """Return prov_index geometries pre-projected to ccrs.Mercator() (cached)."""
+        global _PROV_GEOMS_MERC_CACHE  # pylint: disable=global-statement
+        if _PROV_GEOMS_MERC_CACHE is None:
+            async with _PROV_GEOMS_MERC_LOCK:
+                if _PROV_GEOMS_MERC_CACHE is None:
+                    projected = await asyncio.to_thread(
+                        AlertGenerationService._project_index_to_mercator, prov_index
+                    )
+                    _PROV_GEOMS_MERC_CACHE = [geom for _, geom in projected]
+        return _PROV_GEOMS_MERC_CACHE
+
+    @staticmethod
+    def _project_index_to_mercator(index: list) -> list:
+        """Project each geometry in a (bbox, geom) index list to ccrs.Mercator()."""
+        pc = ccrs.PlateCarree()
+        merc = ccrs.Mercator()
+        result = []
+        for bbox, geom in index:
+            projected = merc.project_geometry(geom, pc)
+            if not projected.is_empty:
+                result.append((bbox, projected))
+        return result
+
+    @staticmethod
     def _compute_spatial_filter(
         input_geom, dept_index: list, all_departments: list, umbral: float
     ) -> list:
@@ -323,6 +376,27 @@ class AlertGenerationService:  # pylint: disable=too-few-public-methods
                 result.append(department)
         return result
 
+    async def prewarm_render_geometry(self) -> None:
+        """Project + cache the dept/prov index to Mercator at startup.
+
+        Called from the app lifespan after the scheduler builds the caches, so the
+        first alert doesn't pay the projection cost and no cartopy runs mid-request.
+        Best-effort: never blocks startup.
+        """
+        try:
+            cache_dir = self.settings.alert_cache_dir
+            dept_index = await self._get_dept_index(
+                os.path.join(cache_dir, "dept_index.pkl")
+            )
+            prov_index = await self._get_prov_index(
+                os.path.join(cache_dir, "prov_index.pkl")
+            )
+            await self._get_dept_index_merc(dept_index or [])
+            await self._get_prov_geoms_merc(prov_index or [])
+            self.logger.info("Render geometry pre-warmed (dept/prov → Mercator)")
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            self.logger.warning("Render-geometry pre-warm failed: %s", exc)
+
     async def _run_visualization_worker(
         self,
         geometry,
@@ -337,12 +411,17 @@ class AlertGenerationService:  # pylint: disable=too-few-public-methods
         dept_index = await self._get_dept_index(dept_index_path)
         prov_index = await self._get_prov_index(prov_index_path)
 
+        # Send Mercator-projected geometries for rendering — avoids cartopy
+        # reprojecting ~53k vertices per request in the worker.
+        dept_index_merc = await self._get_dept_index_merc(dept_index or [])
+        prov_geoms_merc = await self._get_prov_geoms_merc(prov_index or [])
+
         dept_index_serialized = [
             {"bbox": list(bbox), "wkb_hex": shapely_wkb.dumps(geom, hex=True)}
-            for bbox, geom in (dept_index or [])
+            for bbox, geom in dept_index_merc
         ]
         prov_geoms_serialized = [
-            shapely_wkb.dumps(geom, hex=True) for _, geom in (prov_index or [])
+            shapely_wkb.dumps(geom, hex=True) for geom in prov_geoms_merc
         ]
 
         payload = json.dumps(
