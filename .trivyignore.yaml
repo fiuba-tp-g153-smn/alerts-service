@@ -12,3 +12,22 @@ vulnerabilities:
   - id: CVE-2026-8376
     expires-at: 2026-07-01
     statement: "perl-base not reachable; service never compiles Perl regex. No Debian fix available yet."
+
+  # MariaDB server CVEs flagged against libmariadb3/mariadb-common (source pkg
+  # "mariadb"). These packages are a transitive dependency of libgdal36, NOT of
+  # our Python MySQL client (mysql-connector-python is pure-Python and links
+  # neither; the only reverse-dep of libmariadb3 in the image is libgdal36).
+  # The vulnerable code is server-side (CONNECT/REST engine, Galera wsrep) — no
+  # MariaDB server runs here, and GDAL's MySQL driver is never invoked (we read
+  # GeoJSON/shapefiles). Fixed in sid (11.8.8); no trixie patch as of 2026-06-18.
+  # Re-evaluate after `expires-at` — a rebuild will clear these once Debian
+  # backports the fix to trixie.
+  - id: CVE-2026-44170
+    expires-at: 2026-08-01
+    statement: "MariaDB server CONNECT/REST RCE; no server in image, libmariadb3 unused. No trixie fix yet."
+  - id: CVE-2026-49261
+    expires-at: 2026-08-01
+    statement: "MariaDB server Galera wsrep RCE; no server in image, libmariadb3 unused. No trixie fix yet."
+  - id: CVE-2026-44172
+    expires-at: 2026-08-01
+    statement: "MariaDB connector big5 escape bypass; libmariadb3 present only via GDAL and never invoked. No trixie fix yet."
