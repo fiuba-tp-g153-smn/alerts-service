@@ -225,7 +225,7 @@ class AlertGenerationService:  # pylint: disable=too-few-public-methods
         if not input_geom.is_valid:
             input_geom = input_geom.buffer(0)
 
-        umbral = 0.001  # minimum department coverage fraction (same as genero_aviso.py)
+        threshold = 0.001  # minimum department coverage fraction (same as genero_aviso.py)
 
         # Load full department geometries from cached index (double-checked locking)
         dept_index_path = os.path.join(self.settings.alert_cache_dir, "dept_index.pkl")
@@ -237,7 +237,7 @@ class AlertGenerationService:  # pylint: disable=too-few-public-methods
                 input_geom,
                 dept_index,
                 all_departments,
-                umbral,
+                threshold,
             )
         else:
             # Fallback if cache not built yet: use intersection fragments
@@ -336,7 +336,7 @@ class AlertGenerationService:  # pylint: disable=too-few-public-methods
 
     @staticmethod
     def _compute_spatial_filter(
-        input_geom, dept_index: list, all_departments: list, umbral: float
+        input_geom, dept_index: list, all_departments: list, threshold: float
     ) -> list:
         """CPU-bound spatial filtering (runs in thread pool)."""
         dept_geoms = []
@@ -347,7 +347,7 @@ class AlertGenerationService:  # pylint: disable=too-few-public-methods
             inter = dg.intersection(input_geom)
             if inter.is_empty:
                 continue
-            if inter.area / dg.area >= umbral:
+            if inter.area / dg.area >= threshold:
                 dept_geoms.append(dg)
 
         result = []
@@ -462,7 +462,12 @@ class AlertGenerationService:  # pylint: disable=too-few-public-methods
                 raise
 
         if proc.returncode != 0:
-            self.logger.error(f"Worker failed: {stderr_bytes.decode()}")
+            self.logger.error(
+                "Worker failed (exit %s)\nstderr:\n%s\nstdout:\n%s",
+                proc.returncode,
+                stderr_bytes.decode(errors="replace"),
+                stdout_bytes.decode(errors="replace")[:2000],
+            )
             raise RuntimeError(f"Worker failed (exit {proc.returncode})")
 
         try:

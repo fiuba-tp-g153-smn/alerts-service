@@ -5,7 +5,7 @@ import pickle
 
 from scheduler import (
     _IGN_CACHE_FORMAT_VERSION,
-    _cuarteron_up_to_date,
+    _inset_up_to_date,
     _ign_cache_up_to_date,
 )
 
@@ -42,24 +42,24 @@ def _touch(path, mtime):
 def test_cuarteron_missing_png_rebuilds(tmp_path):
     svg = tmp_path / "c.svg"
     svg.write_bytes(b"<svg/>")
-    assert _cuarteron_up_to_date(str(tmp_path / "c.png"), str(svg)) is False
+    assert _inset_up_to_date(str(tmp_path / "c.png"), str(svg)) is False
 
 
 def test_cuarteron_png_newer_than_svg_is_fresh(tmp_path):
     png, svg = tmp_path / "c.png", tmp_path / "c.svg"
     _touch(svg, 1000)
     _touch(png, 2000)
-    assert _cuarteron_up_to_date(str(png), str(svg)) is True
+    assert _inset_up_to_date(str(png), str(svg)) is True
 
 
 def test_cuarteron_png_older_than_svg_rebuilds(tmp_path):
     png, svg = tmp_path / "c.png", tmp_path / "c.svg"
     _touch(png, 1000)
     _touch(svg, 2000)
-    assert _cuarteron_up_to_date(str(png), str(svg)) is False
+    assert _inset_up_to_date(str(png), str(svg)) is False
 
 
 def test_cuarteron_svg_missing_keeps_existing_png(tmp_path):
     png = tmp_path / "c.png"
     png.write_bytes(b"x")
-    assert _cuarteron_up_to_date(str(png), str(tmp_path / "missing.svg")) is True
+    assert _inset_up_to_date(str(png), str(tmp_path / "missing.svg")) is True

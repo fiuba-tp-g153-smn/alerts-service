@@ -118,7 +118,7 @@ async def lifespan(_app: FastAPI):
 
 app: FastAPI = FastAPI(
     title="alerts-service",
-    description="Servicio que maneja la gestión de alertas",
+    description="Service that manages alert generation",
     contact={
         "name": "FIUBA TPF Team N°153 Altamirano, Diem, Gismondi, Valeriani",
     },
