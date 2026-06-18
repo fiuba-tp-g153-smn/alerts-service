@@ -34,6 +34,9 @@ class FakeMySQLRepository(IMySQLRepository):
     def get_polygon_max_length(self) -> int:
         return 1000
 
+    def get_area_max_length(self) -> int:
+        return 2000
+
     def get_phenomenon_text(self, code: int) -> Optional[str]:
         return None
 

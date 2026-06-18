@@ -13,11 +13,13 @@ from container import (
     get_geo_repo,
     get_history_repo,
     get_mysql_repo,
+    get_singleton_alert_service,
     get_taviso_repo,
 )
 from controller import alerts, general, intersections
 from dependencies import logger, settings
 from scheduler import setup_scheduler
+from services.alert_job_processor import AlertJobProcessor
 
 
 @asynccontextmanager
@@ -45,6 +47,17 @@ async def lifespan(_app: FastAPI):
     geo_repo = get_geo_repo()
     geo_repo.start_eviction_loop()
 
+    # Background worker pool for asynchronous alert generation. Started after the
+    # scheduler built the alert caches; stored on app.state (loop-bound lifecycle).
+    processor = AlertJobProcessor(
+        get_singleton_alert_service(),
+        logger,
+        maxsize=settings.alert_job_queue_maxsize,
+        workers=settings.alert_job_workers,
+    )
+    processor.start()
+    _app.state.alert_job_processor = processor
+
     logger.info("Application startup complete.")
 
     yield
@@ -52,6 +65,10 @@ async def lifespan(_app: FastAPI):
     logger.info("Application shutdown: stopping scheduler ...")
     scheduler.shutdown()
     logger.info("Scheduler stopped.")
+
+    # Drain in-flight alert jobs before closing DB pools so an in-flight insert
+    # never hits a closing connection pool.
+    await processor.shutdown(drain=True, timeout=settings.alert_job_shutdown_seconds)
 
     await geo_repo.stop_eviction_loop()
 

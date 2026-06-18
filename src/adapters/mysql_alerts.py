@@ -148,6 +148,14 @@ class MySQLAlertsRepository(IMySQLRepository):
 
     def get_polygon_max_length(self) -> int:
         """Return the VARCHAR character limit of taviso_temporal.Poligono."""
+        return self._get_column_max_length("Poligono")
+
+    def get_area_max_length(self) -> int:
+        """Return the VARCHAR character limit of taviso_temporal.Area."""
+        return self._get_column_max_length("Area")
+
+    def _get_column_max_length(self, column: str) -> int:
+        """Return the CHARACTER_MAXIMUM_LENGTH of a taviso_temporal column."""
         conn = self.pool.get_connection()
         cursor = None
         try:
@@ -156,12 +164,13 @@ class MySQLAlertsRepository(IMySQLRepository):
                 "SELECT CHARACTER_MAXIMUM_LENGTH FROM INFORMATION_SCHEMA.COLUMNS"
                 " WHERE TABLE_SCHEMA = DATABASE()"
                 "   AND TABLE_NAME = 'taviso_temporal'"
-                "   AND COLUMN_NAME = 'Poligono'"
+                "   AND COLUMN_NAME = %s",
+                (column,),
             )
             row = cursor.fetchone()
             if row is None or row[0] is None:
                 raise RuntimeError(
-                    "Could not determine VARCHAR limit of taviso_temporal.Poligono"
+                    f"Could not determine VARCHAR limit of taviso_temporal.{column}"
                 )
             return int(row[0])
         finally:

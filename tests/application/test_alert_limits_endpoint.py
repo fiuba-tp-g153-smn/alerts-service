@@ -18,6 +18,9 @@ class FakeMySQLRepository(IMySQLRepository):
     def get_polygon_max_length(self) -> int:
         return self._polygon_max_length
 
+    def get_area_max_length(self) -> int:
+        return 2000
+
     def get_departments(self) -> List[dict]:
         return []
 

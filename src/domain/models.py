@@ -17,6 +17,24 @@ class PolygonTooLargeError(ValueError):
         self.max_vertex_count = max_vertex_count
 
 
+class AreaTooLargeError(ValueError):
+    """Raised when the affected-area HTML exceeds the database column limit.
+
+    Unlike the polygon size (known up front), the affected area depends on the
+    intersection result, so this can only be detected during generation. Carries
+    the column limit, the actual length, and the number of affected departments
+    so the user can be told to reduce the polygon.
+    """
+
+    def __init__(
+        self, message: str, max_chars: int, actual_chars: int, affected_count: int
+    ):
+        super().__init__(message)
+        self.max_chars = max_chars
+        self.actual_chars = actual_chars
+        self.affected_count = affected_count
+
+
 class LayerType(Enum):
     """Enumeration of supported geographic layer types."""
 

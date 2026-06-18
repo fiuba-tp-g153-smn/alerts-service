@@ -13,7 +13,8 @@ from typing import List
 from shapely import wkb as shapely_wkb
 from shapely.geometry import Point, shape
 
-from domain.models import PolygonTooLargeError
+from domain.alert_job import PreparedAlert
+from domain.models import AreaTooLargeError, PolygonTooLargeError
 from ports.mysql_repository import IMySQLRepository
 from services.geo_intersection_service import GeoIntersectionService
 from settings import Settings
@@ -52,10 +53,34 @@ class AlertGenerationService:  # pylint: disable=too-few-public-methods
         self.settings = settings
         self.logger = logger
 
-    async def generate_alert(  # pylint: disable=too-many-locals
+    async def validate_request(
         self, geometry: dict, phenomenon_code: int
+    ) -> PreparedAlert:
+        """Validate an alert request quickly, before any expensive work.
+
+        Runs the cheap checks that the POST handler needs synchronously so it can
+        return 400/413 immediately: the phenomenon code must be known and the
+        serialized polygon must fit the DB column. Returns the phenomenon text
+        and serialized polygon so the heavy generation step need not recompute
+        the lookup.
+        """
+        phenomenon_text = self.mysql_repo.get_phenomenon_text(phenomenon_code)
+        if not phenomenon_text:
+            raise ValueError(f"Invalid phenomenon code: {phenomenon_code}")
+
+        polygon_str = self._format_polygon(geometry)
+        await self._validate_polygon_size(polygon_str)
+        return PreparedAlert(phenomenon_text=phenomenon_text, polygon_str=polygon_str)
+
+    async def generate_alert(  # pylint: disable=too-many-locals
+        self, geometry: dict, phenomenon_code: int, phenomenon_text: str | None = None
     ) -> dict:
         """Generate alert from geometry and phenomenon code.
+
+         When `phenomenon_text` is provided (background worker path), the cheap
+         validation done by `validate_request` is skipped. When it is None, the
+         request is validated here so the method stays correct when called
+         directly.
 
          Returns dict with:
          - alert_id: Database ID of saved alert
@@ -70,15 +95,13 @@ class AlertGenerationService:  # pylint: disable=too-few-public-methods
         """
         t0 = time.perf_counter()
 
-        # 1. Validate code
-        phenomenon_text = self.mysql_repo.get_phenomenon_text(phenomenon_code)
-        if not phenomenon_text:
-            raise ValueError(f"Invalid phenomenon code: {phenomenon_code}")
-
-        # 1b. Validate polygon size against the DB column limit before doing any
-        # expensive work (polygon_str depends only on the input geometry).
-        polygon_str = self._format_polygon(geometry)
-        await self._validate_polygon_size(polygon_str)
+        # 1. Validate (skipped when the caller already validated the request).
+        if phenomenon_text is None:
+            prepared = await self.validate_request(geometry, phenomenon_code)
+            phenomenon_text = prepared.phenomenon_text
+            polygon_str = prepared.polygon_str
+        else:
+            polygon_str = self._format_polygon(geometry)
 
         # 2. Calculate intersection with departments (reuse existing service)
         self.logger.info(f"Calculating intersections for phenomenon {phenomenon_code}")
@@ -114,6 +137,11 @@ class AlertGenerationService:  # pylint: disable=too-few-public-methods
             len(polygon_str),
         )
         self.logger.info("polygon str value: %s", polygon_str)
+
+        # 5b. Validate area HTML against the DB column limit before insert, so an
+        # oversized affected area becomes an actionable error instead of a raw
+        # MySQL DataError. Only knowable now (depends on the intersection result).
+        await self._validate_area_size(area_html, len(affected_departments))
 
         # Extract just the filename from full path (persisted in DB and used for URL)
         gif_area_filename = os.path.basename(worker_result["gif_area"])
@@ -376,6 +404,20 @@ class AlertGenerationService:  # pylint: disable=too-few-public-methods
             f" column limit of {max_chars}. Use more aggressive simplification to"
             " reduce the number of vertices in the input polygon.",
             max_vertex_count=self._max_vertex_count(max_chars),
+        )
+
+    async def _validate_area_size(self, area_html: str, affected_count: int) -> None:
+        """Raise AreaTooLargeError if area_html exceeds the DB column limit."""
+        max_chars = await asyncio.to_thread(self.mysql_repo.get_area_max_length)
+        if len(area_html) <= max_chars:
+            return
+        raise AreaTooLargeError(
+            f"Affected-area HTML is {len(area_html)} characters, exceeds DB column"
+            f" limit of {max_chars}. The polygon covers too many departments;"
+            " reduce its size.",
+            max_chars=max_chars,
+            actual_chars=len(area_html),
+            affected_count=affected_count,
         )
 
     def _format_polygon(self, geometry: dict) -> str:

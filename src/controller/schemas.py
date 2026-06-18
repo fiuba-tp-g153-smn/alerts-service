@@ -96,6 +96,36 @@ class AlertSummary(BaseModel):
         return value.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+class AlertJobAccepted(BaseModel):
+    """Body returned by `POST /alerts` (202) when a job is accepted.
+
+    Generation runs in the background; poll `GET /alerts/jobs/{job_id}` for the
+    outcome. The echoed `phenomenon` and `polygon` let the client render an
+    optimistic "processing" placeholder before the alert is generated.
+    """
+
+    job_id: str
+    phenomenon_code: int
+    phenomenon: str
+    polygon: str
+
+
+class AlertJobStatus(BaseModel):
+    """Status of a background alert generation job.
+
+    `status` is one of queued | processing | done | failed. On `done`,
+    `alert_id` is the generated `IdAviso_temporal`. On `failed`, `error_code`
+    is a stable machine-readable reason (e.g. `area_too_large`) and `error` a
+    human-readable message.
+    """
+
+    job_id: str
+    status: str
+    alert_id: Optional[int] = None
+    error_code: Optional[str] = None
+    error: Optional[str] = None
+
+
 class PendingAlertSummary(BaseModel):
     """Summary of a pending alert from the `taviso_temporal` table.
 

@@ -64,6 +64,11 @@ class Settings:  # pylint: disable=too-many-instance-attributes,too-few-public-m
     alert_cache_dir: str = ""
     alert_detail_level: int = 7
 
+    # Asynchronous alert generation (background worker pool)
+    alert_job_workers: int = 2
+    alert_job_queue_maxsize: int = 16
+    alert_job_shutdown_seconds: float = 130.0
+
     def __init__(self):
         self._load_from_env()
         self._load_from_file()
@@ -80,8 +85,15 @@ class Settings:  # pylint: disable=too-many-instance-attributes,too-few-public-m
         self.layer_cache_ttl_minutes: int = int(data.get("layer_cache_ttl_minutes", 30))
         raw = data.get("detail_levels", {})
         self.detail_levels = {int(k): float(v) for k, v in raw.items()}
-        self.departments_detail_level = float(data.get("departments_detail_level", 0.005))
+        self.departments_detail_level = float(
+            data.get("departments_detail_level", 0.005)
+        )
         self.alert_detail_level = int(data.get("alert_detail_level", 7))
+        self.alert_job_workers = int(data.get("alert_job_workers", 2))
+        self.alert_job_queue_maxsize = int(data.get("alert_job_queue_maxsize", 16))
+        self.alert_job_shutdown_seconds = float(
+            data.get("alert_job_shutdown_seconds", 130.0)
+        )
 
     def _load_from_env(self) -> None:
         self.log_level = os.getenv("LOG_LEVEL", self.log_level)
@@ -146,8 +158,13 @@ class Settings:  # pylint: disable=too-many-instance-attributes,too-few-public-m
         for level, tolerance in self.detail_levels.items():
             logger.info("DETAIL_LEVEL_%s: %s", level, tolerance)
 
-        logger.info("DEPARTMENTS_DETAIL_LEVEL_TOLERANCE: %s", self.departments_detail_level)
+        logger.info(
+            "DEPARTMENTS_DETAIL_LEVEL_TOLERANCE: %s", self.departments_detail_level
+        )
         logger.info("ALERT_DETAIL_LEVEL: %s", self.alert_detail_level)
+        logger.info("ALERT_JOB_WORKERS: %s", self.alert_job_workers)
+        logger.info("ALERT_JOB_QUEUE_MAXSIZE: %s", self.alert_job_queue_maxsize)
+        logger.info("ALERT_JOB_SHUTDOWN_SECONDS: %s", self.alert_job_shutdown_seconds)
         logger.info("MYSQL_TAVISO_HOST: %s", self.mysql_taviso_host)
         logger.info("MYSQL_TAVISO_DATABASE: %s", self.mysql_taviso_database)
         logger.info("S3_ENDPOINT: %s", self.s3_endpoint)

@@ -43,6 +43,13 @@ class IMySQLRepository(ABC):
         limit cannot be determined (column missing or no length defined)."""
 
     @abstractmethod
+    def get_area_max_length(self) -> int:
+        """Return the VARCHAR character limit of the taviso_temporal.Area column.
+
+        Used to validate the affected-area HTML before insertion. Raises if the
+        limit cannot be determined (column missing or no length defined)."""
+
+    @abstractmethod
     def get_phenomenon_text(self, code: int) -> Optional[str]:
         """Get phenomenon description by code."""
 

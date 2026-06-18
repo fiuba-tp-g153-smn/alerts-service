@@ -2,6 +2,9 @@
   "layer_update_cron": "0 3 * * 0",
   "layer_cache_ttl_minutes": 30,
   "alert_detail_level": 7,
+  "alert_job_workers": 2,
+  "alert_job_queue_maxsize": 16,
+  "alert_job_shutdown_seconds": 130,
   "detail_levels": {
     "1": 0.2,
     "2": 0.1,

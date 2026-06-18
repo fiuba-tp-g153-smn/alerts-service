@@ -1,7 +1,6 @@
 """Weather alert generation endpoints."""
 
 import asyncio
-import time
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response
@@ -9,12 +8,15 @@ from fastapi.responses import JSONResponse
 
 from container import (
     get_alert_service,
+    get_job_processor,
     get_logger,
     get_mysql_repo,
     get_taviso_repo,
 )
 from controller.schemas import (
     AlertCreateRequest,
+    AlertJobAccepted,
+    AlertJobStatus,
     AlertLimits,
     AlertSummary,
     PendingAlertSummary,
@@ -24,52 +26,48 @@ from domain.models import PolygonTooLargeError
 from ports.mysql_repository import IMySQLRepository
 from ports.taviso_repository import ITavisoReadRepository
 from services.alert_generation_service import AlertGenerationService
+from services.alert_job_processor import AlertJobProcessor
 
 router = APIRouter(prefix="/alerts", tags=["Alerts"])
 
 
 @router.post(
     "",
-    summary="Generate weather alert maps",
-    response_description="Returns metadata and URLs to generated GIF maps",
+    status_code=202,
+    response_model=AlertJobAccepted,
+    summary="Queue weather alert generation",
+    response_description="Returns a job id to poll for the generation outcome",
 )
 async def generate_alert(
     request: AlertCreateRequest,
     service: AlertGenerationService = Depends(get_alert_service),
+    processor: AlertJobProcessor = Depends(get_job_processor),
     logger=Depends(get_logger),
 ):
     """
-    Generate weather alert GIF maps for the given polygon and phenomenon.
+    Queue background generation of weather alert GIF maps for the given polygon
+    and phenomenon, returning immediately with a job id.
 
     Request body:
     - **phenomenon_code**: Integer code for the weather phenomenon (1-92)
     - **geojson**: GeoJSON Geometry, Feature, or FeatureCollection
 
-    Returns URLs to two generated GIF files:
-    - `gif_area_url`: Zoomed map of the affected area with labeled municipalities
-    - `gif_gral_url`: Full Argentina map with the alert polygon highlighted
+    The request is validated synchronously (so an invalid phenomenon returns
+    `400` and an oversized polygon returns `413`), then the heavy work
+    (intersection + GIF rendering + DB insert) runs in a background worker.
 
-    The response also includes `area` (HTML with affected departments grouped by
-    province) and `polygon` (serialized coordinates), matching the shape of the
-    pending alerts returned by `GET /alerts/pending`.
-
-    Also inserts the alert record into the `taviso_temporal` table in MySQL.
+    Returns `202 Accepted` with a `job_id`. Poll `GET /alerts/jobs/{job_id}` for
+    the outcome; on success the alert appears in `GET /alerts/pending`. If the
+    queue is saturated, returns `503`.
     """
-    start_time = time.perf_counter()
     try:
         phenomenon_code = request.phenomenon_code
         geometry = request.geojson.extract_geometry()
         logger.info(
-            f"generate_alert: processing (phenomenon={phenomenon_code},"
+            f"generate_alert: queueing (phenomenon={phenomenon_code},"
             f" type={geometry.get('type')})"
         )
-        result = await service.generate_alert(geometry, phenomenon_code)
-        elapsed = time.perf_counter() - start_time
-        logger.info(
-            f"generate_alert: done (alert_id={result['alert_id']})"
-            f" in {elapsed:.3f}s"
-        )
-        return JSONResponse(content=result)
+        prepared = await service.validate_request(geometry, phenomenon_code)
     except PolygonTooLargeError as e:
         logger.error(f"generate_alert: polygon too large: {e}")
         return JSONResponse(
@@ -79,12 +77,53 @@ async def generate_alert(
     except ValueError as e:
         logger.warning(f"generate_alert: bad request: {e}")
         raise HTTPException(status_code=400, detail=str(e)) from e
-    except FileNotFoundError as e:
-        logger.error(f"generate_alert: layer file not found: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
-    except Exception as e:
-        logger.error(f"generate_alert: unexpected error: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e)) from e
+
+    job_id = processor.try_submit(geometry, phenomenon_code, prepared.phenomenon_text)
+    if job_id is None:
+        logger.warning("generate_alert: queue full, rejecting submission")
+        raise HTTPException(
+            status_code=503, detail="Alert generation queue is full, try again later"
+        )
+
+    logger.info(f"generate_alert: accepted (job_id={job_id})")
+    return AlertJobAccepted(
+        job_id=job_id,
+        phenomenon_code=phenomenon_code,
+        phenomenon=prepared.phenomenon_text,
+        polygon=prepared.polygon_str,
+    )
+
+
+@router.get(
+    "/jobs/{job_id}",
+    summary="Get alert generation job status",
+    response_description="Returns the status of a background alert generation job",
+    response_model=AlertJobStatus,
+)
+async def get_alert_job(
+    job_id: str,
+    processor: AlertJobProcessor = Depends(get_job_processor),
+):
+    """
+    Get the status of a background alert generation job.
+
+    - **status**: queued | processing | done | failed
+    - **alert_id**: present on `done` (the generated `IdAviso_temporal`)
+    - **error_code** / **error**: present on `failed` (e.g. `area_too_large`)
+
+    Job records are kept in memory and may be evicted or lost on restart; an
+    unknown `job_id` returns `404`.
+    """
+    record = processor.get_status(job_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="Unknown job_id")
+    return AlertJobStatus(
+        job_id=job_id,
+        status=record.status.value,
+        alert_id=record.alert_id,
+        error_code=record.error_code,
+        error=record.error,
+    )
 
 
 @router.get(
