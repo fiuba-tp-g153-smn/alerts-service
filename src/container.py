@@ -10,7 +10,9 @@ from adapters.geo_layer_repository import FileSystemGeoLayerRepository
 from adapters.mysql_alerts import MySQLAlertsRepository
 from adapters.mysql_taviso import MySQLTavisoReadRepository
 from adapters.sqlite_history import SqliteHistoryRepository
+from adapters.sqlite_metrics import SqliteAlertMetricsRepository
 from initializers import init_logger
+from ports.metrics_repository import IAlertMetricsRepository
 from ports.mysql_repository import IMySQLRepository
 from ports.taviso_repository import ITavisoReadRepository
 from services.alert_generation_service import AlertGenerationService
@@ -52,6 +54,13 @@ def get_history_repo() -> SqliteHistoryRepository:
     """Return a singleton SQLite job history repository."""
     settings = get_settings()
     return SqliteHistoryRepository(os.path.join(settings.data_dir, "history.db"))
+
+
+@lru_cache
+def get_metrics_repo() -> IAlertMetricsRepository:
+    """Return a singleton SQLite metrics repository (schema owned by migrations)."""
+    settings = get_settings()
+    return SqliteAlertMetricsRepository(settings.metrics_db_path)
 
 
 @lru_cache

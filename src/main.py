@@ -12,14 +12,17 @@ from fastapi.staticfiles import StaticFiles
 from container import (
     get_geo_repo,
     get_history_repo,
+    get_metrics_repo,
     get_mysql_repo,
     get_singleton_alert_service,
     get_taviso_repo,
 )
-from controller import alerts, general, intersections
+from controller import alerts, general, intersections, metrics
+from db.migrate import ensure_migrations
 from dependencies import logger, settings
 from scheduler import setup_scheduler
 from services.alert_job_processor import AlertJobProcessor
+from services.metrics_sampler import MetricsSampler
 
 
 @asynccontextmanager
@@ -47,6 +50,14 @@ async def lifespan(_app: FastAPI):
     geo_repo = get_geo_repo()
     geo_repo.start_eviction_loop()
 
+    # Metrics store: migrate the local SQLite DB, then open it. Disabled via
+    # settings → no recording, no sampler, processor gets metrics=None.
+    metrics_repo = None
+    if settings.metrics_enabled:
+        await asyncio.to_thread(ensure_migrations, settings)
+        metrics_repo = get_metrics_repo()
+        await metrics_repo.connect()
+
     # Background worker pool for asynchronous alert generation. Started after the
     # scheduler built the alert caches; stored on app.state (loop-bound lifecycle).
     processor = AlertJobProcessor(
@@ -56,9 +67,18 @@ async def lifespan(_app: FastAPI):
         workers=settings.alert_job_workers,
         job_timeout=settings.alert_job_timeout_seconds,
         supervisor_interval=settings.alert_supervisor_interval_seconds,
+        metrics=metrics_repo,
     )
     processor.start()
     _app.state.alert_job_processor = processor
+
+    # Periodic processor-health sampler (records into the metrics store).
+    sampler = None
+    if metrics_repo is not None:
+        sampler = MetricsSampler(
+            processor, get_mysql_repo(), metrics_repo, settings, logger
+        )
+        sampler.start()
 
     logger.info("Application startup complete.")
 
@@ -68,8 +88,12 @@ async def lifespan(_app: FastAPI):
     scheduler.shutdown()
     logger.info("Scheduler stopped.")
 
-    # Drain in-flight alert jobs before closing DB pools so an in-flight insert
-    # never hits a closing connection pool.
+    # Stop the sampler first (it reads the processor + MySQL and writes metrics),
+    # then drain in-flight alert jobs before closing DB pools so an in-flight
+    # insert never hits a closing connection pool.
+    if sampler is not None:
+        await sampler.stop()
+
     await processor.shutdown(drain=True, timeout=settings.alert_job_shutdown_seconds)
 
     await geo_repo.stop_eviction_loop()
@@ -80,6 +104,10 @@ async def lifespan(_app: FastAPI):
     # a connection to the external database just to close it.
     if get_taviso_repo.cache_info().currsize:
         get_taviso_repo().close()
+    # Close the metrics store last — after the processor drained, so a draining
+    # job's record_job still has an open store.
+    if metrics_repo is not None:
+        await metrics_repo.close()
     logger.info("Database connections closed.")
 
 
@@ -107,6 +135,7 @@ app.add_middleware(
 app.include_router(general.router)
 app.include_router(intersections.router)
 app.include_router(alerts.router)
+app.include_router(metrics.router)
 
 # Serve generated alert GIFs as static files
 _output_dir = settings.output_dir

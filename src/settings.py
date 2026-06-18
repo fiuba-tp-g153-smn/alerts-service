@@ -71,6 +71,13 @@ class Settings:  # pylint: disable=too-many-instance-attributes,too-few-public-m
     alert_supervisor_interval_seconds: float = 30.0
     alert_job_shutdown_seconds: float = 160.0
 
+    # Metrics store (local SQLite, dashboard observability)
+    metrics_enabled: bool = True
+    metrics_db_path: str = ""
+    metrics_sample_interval_seconds: float = 60.0
+    metrics_retention_days: int = 30
+    metrics_max_rows: int = 100000
+
     def __init__(self):
         self._load_from_env()
         self._load_from_file()
@@ -102,6 +109,12 @@ class Settings:  # pylint: disable=too-many-instance-attributes,too-few-public-m
         self.alert_job_shutdown_seconds = float(
             data.get("alert_job_shutdown_seconds", 160.0)
         )
+        self.metrics_enabled = bool(data.get("metrics_enabled", True))
+        self.metrics_sample_interval_seconds = float(
+            data.get("metrics_sample_interval_seconds", 60.0)
+        )
+        self.metrics_retention_days = int(data.get("metrics_retention_days", 30))
+        self.metrics_max_rows = int(data.get("metrics_max_rows", 100000))
 
     def _load_from_env(self) -> None:
         self.log_level = os.getenv("LOG_LEVEL", self.log_level)
@@ -150,6 +163,9 @@ class Settings:  # pylint: disable=too-many-instance-attributes,too-few-public-m
 
         self.output_dir = os.getenv("OUTPUT_DIR", self.output_dir)
         self.alert_cache_dir = os.getenv("ALERT_CACHE_DIR", self.alert_cache_dir)
+        self.metrics_db_path = os.getenv(
+            "METRICS_DB_PATH", os.path.join(self.data_dir, "metrics.sqlite")
+        )
 
     def log_config(self, logger: Logger) -> None:
         """Log all non-secret configuration values."""
@@ -178,6 +194,14 @@ class Settings:  # pylint: disable=too-many-instance-attributes,too-few-public-m
             self.alert_supervisor_interval_seconds,
         )
         logger.info("ALERT_JOB_SHUTDOWN_SECONDS: %s", self.alert_job_shutdown_seconds)
+        logger.info("METRICS_ENABLED: %s", self.metrics_enabled)
+        logger.info("METRICS_DB_PATH: %s", self.metrics_db_path)
+        logger.info(
+            "METRICS_SAMPLE_INTERVAL_SECONDS: %s",
+            self.metrics_sample_interval_seconds,
+        )
+        logger.info("METRICS_RETENTION_DAYS: %s", self.metrics_retention_days)
+        logger.info("METRICS_MAX_ROWS: %s", self.metrics_max_rows)
         logger.info("MYSQL_TAVISO_HOST: %s", self.mysql_taviso_host)
         logger.info("MYSQL_TAVISO_DATABASE: %s", self.mysql_taviso_database)
         logger.info("S3_ENDPOINT: %s", self.s3_endpoint)

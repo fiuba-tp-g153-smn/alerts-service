@@ -23,6 +23,20 @@ _WORKER_PATH = os.path.join(
     os.path.dirname(__file__), "..", "alert_generation_worker.py"
 )
 
+# Confine each render subprocess's numpy/matplotlib BLAS/OpenMP backends to a
+# single thread. Without this, one render fans out to one thread per core and
+# (with the semaphore allowing two at once) saturates the box, starving the
+# FastAPI event loop so every endpoint — incl. the dashboard's /metrics — crawls
+# for the duration of the render. One thread per worker leaves the loop responsive.
+_SUBPROCESS_ENV = {
+    **os.environ,
+    "OMP_NUM_THREADS": "1",
+    "OPENBLAS_NUM_THREADS": "1",
+    "MKL_NUM_THREADS": "1",
+    "NUMEXPR_NUM_THREADS": "1",
+    "VECLIB_MAXIMUM_THREADS": "1",
+}
+
 # Caps concurrent visualization subprocess launches to prevent simultaneous RAM peaks.
 # Value of 2: safe now that dept/prov indices are cached in-process and passed via
 # payload (workers no longer load pickle files from disk independently).
@@ -105,7 +119,9 @@ class AlertGenerationService:  # pylint: disable=too-few-public-methods
 
         # 2. Calculate intersection with departments (reuse existing service)
         self.logger.info(f"Calculating intersections for phenomenon {phenomenon_code}")
+        t_intersect = time.perf_counter()
         departments = await self.geo_service.intersect_departments(geometry)
+        intersection_ms = int((time.perf_counter() - t_intersect) * 1000)
 
         # 3. Filter departments spatially (DB read off the event loop so a MySQL
         # stall can never block the loop / freeze the whole service).
@@ -121,9 +137,11 @@ class AlertGenerationService:  # pylint: disable=too-few-public-methods
 
         # 4. Generate GIFs via subprocess worker
         timestamp = datetime.now().strftime("%y%m%d%H%M%S")
+        t_render = time.perf_counter()
         worker_result = await self._run_visualization_worker(
             geometry, phenomenon_text, timestamp, affected_departments, all_departments
         )
+        render_ms = int((time.perf_counter() - t_render) * 1000)
 
         if worker_result.get("status") != "success":
             raise RuntimeError(f"Visualization failed: {worker_result.get('error')}")
@@ -171,6 +189,8 @@ class AlertGenerationService:  # pylint: disable=too-few-public-methods
             "gif_area_url": f"/alerts/{gif_area_filename}",
             "gif_gral_url": f"/alerts/{gif_gral_filename}",
             "affected_departments_count": len(affected_departments),
+            "intersection_ms": intersection_ms,
+            "render_ms": render_ms,
         }
 
     async def _filter_departments_by_departments(  # pylint: disable=too-many-locals
@@ -338,6 +358,7 @@ class AlertGenerationService:  # pylint: disable=too-few-public-methods
                 stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                env=_SUBPROCESS_ENV,
             )
             try:
                 stdout_bytes, stderr_bytes = await asyncio.wait_for(

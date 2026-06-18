@@ -11,7 +11,19 @@ import aiohttp
 
 from ports.geo_layer_processor import IGeoLayerProcessor
 
-_WORKER_ENV = {**os.environ, "OGR_GEOJSON_MAX_OBJ_SIZE": "0"}
+# OGR_GEOJSON_MAX_OBJ_SIZE=0 lifts GDAL's per-feature size cap; the thread caps
+# confine numpy/GEOS BLAS/OpenMP to one thread so a simplification job doesn't
+# fan out to every core and starve the event loop (same reason as the alert
+# render worker — see services/alert_generation_service.py:_SUBPROCESS_ENV).
+_WORKER_ENV = {
+    **os.environ,
+    "OGR_GEOJSON_MAX_OBJ_SIZE": "0",
+    "OMP_NUM_THREADS": "1",
+    "OPENBLAS_NUM_THREADS": "1",
+    "MKL_NUM_THREADS": "1",
+    "NUMEXPR_NUM_THREADS": "1",
+    "VECLIB_MAXIMUM_THREADS": "1",
+}
 _WORKER_PATH = os.path.abspath(
     os.path.join(os.path.dirname(__file__), "..", "geo_processing_worker.py")
 )

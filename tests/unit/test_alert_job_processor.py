@@ -185,6 +185,76 @@ async def test_shutdown_drains_queued_jobs():
     assert record.status is JobStatus.DONE
 
 
+async def _wait_recorded(recorder, timeout: float = 2.0):
+    async with asyncio.timeout(timeout):
+        while not recorder.record_job.await_count:
+            await asyncio.sleep(0.01)
+
+
+async def test_records_done_job_to_metrics():
+    service = _make_service(
+        return_value={
+            "alert_id": 9,
+            "affected_departments_count": 7,
+            "intersection_ms": 40,
+            "render_ms": 800,
+        }
+    )
+    recorder = MagicMock()
+    recorder.record_job = AsyncMock()
+    proc = AlertJobProcessor(
+        service, logging.getLogger("test"), 16, 1, metrics=recorder
+    )
+    proc.start()
+    try:
+        job_id = proc.try_submit(GEOMETRY, 3, "TORMENTAS")
+        await _wait_recorded(recorder)
+        kwargs = recorder.record_job.await_args.kwargs
+        assert kwargs["outcome"] == "done"
+        assert kwargs["job_id"] == job_id
+        assert kwargs["phenomenon_code"] == 3
+        assert kwargs["affected_departments"] == 7
+        assert kwargs["intersection_ms"] == 40
+        assert kwargs["polygon_vertices"] == 4  # GEOMETRY outer ring has 4 points
+    finally:
+        await proc.shutdown(drain=False, timeout=1)
+
+
+async def test_records_failed_job_to_metrics():
+    service = _make_service(side_effect=RuntimeError("boom"))
+    recorder = MagicMock()
+    recorder.record_job = AsyncMock()
+    proc = AlertJobProcessor(
+        service, logging.getLogger("test"), 16, 1, metrics=recorder
+    )
+    proc.start()
+    try:
+        proc.try_submit(GEOMETRY, 1, "TORMENTAS")
+        await _wait_recorded(recorder)
+        kwargs = recorder.record_job.await_args.kwargs
+        assert kwargs["outcome"] == "failed"
+        assert kwargs["error_code"] == "generation_failed"
+        assert kwargs["intersection_ms"] is None
+    finally:
+        await proc.shutdown(drain=False, timeout=1)
+
+
+async def test_stats_reports_counters():
+    service = _make_service(return_value={"alert_id": 1})
+    proc = AlertJobProcessor(service, logging.getLogger("test"), 16, 1)
+    proc.start()
+    try:
+        job_id = proc.try_submit(GEOMETRY, 1, "TORMENTAS")
+        await _wait_terminal(proc, job_id)
+        await asyncio.sleep(0.02)
+        stats = proc.stats()
+        assert stats["jobs_queued_total"] == 1
+        assert stats["jobs_done_total"] == 1
+        assert stats["workers"] == 1
+    finally:
+        await proc.shutdown(drain=False, timeout=1)
+
+
 async def test_registry_is_bounded(monkeypatch):
     monkeypatch.setattr(ajp, "_REGISTRY_CAP", 2)
     proc = AlertJobProcessor(_make_service(), logging.getLogger("test"), 16, 0)
