@@ -57,6 +57,8 @@ async def test_generate_alert_includes_pending_shape_fields(service):
     assert result["phenomenon"] == "TORMENTAS FUERTES"
     assert result["gif_area_url"] == "/alerts/zoom_alerta.gif"
     assert result["gif_gral_url"] == "/alerts/gral_alerta.gif"
+    assert result["gif_area_filename"] == "zoom_alerta.gif"
+    assert result["gif_gral_filename"] == "gral_alerta.gif"
     assert result["affected_departments_count"] == 2
     # Per-stage timings are present for the dashboard breakdown.
     assert {"intersection_ms", "filter_ms", "render_ms", "persist_ms"} <= result.keys()

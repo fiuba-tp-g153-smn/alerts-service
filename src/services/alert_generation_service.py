@@ -192,6 +192,8 @@ class AlertGenerationService:  # pylint: disable=too-few-public-methods
             "polygon": polygon_str,
             "gif_area_url": f"/alerts/{gif_area_filename}",
             "gif_gral_url": f"/alerts/{gif_gral_filename}",
+            "gif_area_filename": gif_area_filename,
+            "gif_gral_filename": gif_gral_filename,
             "affected_departments_count": len(affected_departments),
             "intersection_ms": intersection_ms,
             "filter_ms": filter_ms,

@@ -62,6 +62,8 @@ class FakeMetricsRepo:
                 render_ms=900,
                 persist_ms=10,
                 polygon_vertices=10,
+                gif_area_filename="aviso_260617100000.gif",
+                gif_gral_filename="avi_gral_260617100000.gif",
             )
         ]
 
@@ -125,6 +127,8 @@ def test_jobs(client):
     assert body[0]["polygon_vertices"] == 10
     assert body[0]["filter_ms"] == 20
     assert body[0]["persist_ms"] == 10
+    assert body[0]["gif_area_filename"] == "aviso_260617100000.gif"
+    assert body[0]["gif_gral_filename"] == "avi_gral_260617100000.gif"
 
 
 def test_jobs_history(client):

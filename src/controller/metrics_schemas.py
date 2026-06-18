@@ -56,6 +56,8 @@ class JobMetric(BaseModel):
     render_ms: Optional[int] = None
     persist_ms: Optional[int] = None
     polygon_vertices: Optional[int] = None
+    gif_area_filename: Optional[str] = None
+    gif_gral_filename: Optional[str] = None
 
 
 class JobHistoryPoint(BaseModel):

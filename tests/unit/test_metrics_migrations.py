@@ -27,10 +27,11 @@ def test_migrations_create_tables_and_stamp_head(tmp_path):
     conn = sqlite3.connect(db)
     try:
         version = conn.execute("SELECT version_num FROM alembic_version").fetchone()[0]
-        assert version == "metrics_0002"
+        assert version == "metrics_0003"
         assert conn.execute("PRAGMA journal_mode").fetchone()[0].lower() == "wal"
         cols = {row[1] for row in conn.execute("PRAGMA table_info(alert_jobs)")}
         assert {"filter_ms", "persist_ms"} <= cols
+        assert {"gif_area_filename", "gif_gral_filename"} <= cols
     finally:
         conn.close()
 

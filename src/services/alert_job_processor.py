@@ -247,6 +247,8 @@ class AlertJobProcessor:  # pylint: disable=too-many-instance-attributes
                 render_ms=result.get("render_ms"),
                 persist_ms=result.get("persist_ms"),
                 polygon_vertices=self._polygon_vertices(job.geometry),
+                gif_area_filename=result.get("gif_area_filename"),
+                gif_gral_filename=result.get("gif_gral_filename"),
             )
         except Exception as exc:  # pylint: disable=broad-exception-caught
             # Metrics must never break job processing.

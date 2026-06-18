@@ -83,6 +83,8 @@ class SqliteAlertMetricsRepository(IAlertMetricsRepository):
         render_ms: Optional[int],
         persist_ms: Optional[int],
         polygon_vertices: Optional[int],
+        gif_area_filename: Optional[str],
+        gif_gral_filename: Optional[str],
     ) -> None:
         row = (
             job_id,
@@ -97,6 +99,8 @@ class SqliteAlertMetricsRepository(IAlertMetricsRepository):
             render_ms,
             persist_ms,
             polygon_vertices,
+            gif_area_filename,
+            gif_gral_filename,
         )
         async with self._access_lock:
             await asyncio.to_thread(self._record_job_sync, row)
@@ -107,8 +111,9 @@ class SqliteAlertMetricsRepository(IAlertMetricsRepository):
             INSERT INTO alert_jobs
                 (job_id, phenomenon_code, finished_at, duration_ms, outcome,
                  error_code, affected_departments, intersection_ms, filter_ms,
-                 render_ms, persist_ms, polygon_vertices)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 render_ms, persist_ms, polygon_vertices, gif_area_filename,
+                 gif_gral_filename)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             row,
         )
@@ -257,7 +262,8 @@ class SqliteAlertMetricsRepository(IAlertMetricsRepository):
         sql = (
             "SELECT job_id, phenomenon_code, finished_at, duration_ms, outcome,"
             " error_code, affected_departments, intersection_ms, filter_ms,"
-            " render_ms, persist_ms, polygon_vertices FROM alert_jobs"
+            " render_ms, persist_ms, polygon_vertices, gif_area_filename,"
+            " gif_gral_filename FROM alert_jobs"
             " WHERE finished_at >= ? ORDER BY finished_at DESC"
         )
         params: list = [since_iso]
@@ -339,6 +345,10 @@ class SqliteAlertMetricsRepository(IAlertMetricsRepository):
             value = r[key]
             return int(value) if value is not None else None
 
+        def _opt_str(key: str) -> Optional[str]:
+            value = r[key]
+            return str(value) if value is not None else None
+
         return JobRow(
             job_id=str(r["job_id"]),
             phenomenon_code=int(r["phenomenon_code"]),
@@ -352,6 +362,8 @@ class SqliteAlertMetricsRepository(IAlertMetricsRepository):
             render_ms=_opt("render_ms"),
             persist_ms=_opt("persist_ms"),
             polygon_vertices=_opt("polygon_vertices"),
+            gif_area_filename=_opt_str("gif_area_filename"),
+            gif_gral_filename=_opt_str("gif_gral_filename"),
         )
 
     @staticmethod

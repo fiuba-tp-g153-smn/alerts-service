@@ -30,6 +30,8 @@ async def _job(repo: SqliteAlertMetricsRepository, **over) -> None:
         render_ms=900,
         persist_ms=10,
         polygon_vertices=10,
+        gif_area_filename="aviso_260617100000.gif",
+        gif_gral_filename="avi_gral_260617100000.gif",
     )
     payload.update(over)
     await repo.record_job(**payload)
@@ -63,6 +65,8 @@ async def test_summary_counts_outcomes_and_failures(tmp_path):
         recent = await repo.get_recent_jobs(_EPOCH, limit=1)
         assert recent[0].filter_ms == 20
         assert recent[0].persist_ms == 10
+        assert recent[0].gif_area_filename == "aviso_260617100000.gif"
+        assert recent[0].gif_gral_filename == "avi_gral_260617100000.gif"
     finally:
         await repo.close()
 

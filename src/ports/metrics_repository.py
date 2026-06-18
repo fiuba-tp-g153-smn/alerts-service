@@ -38,6 +38,8 @@ class IAlertMetricsRepository(ABC):
         render_ms: Optional[int],
         persist_ms: Optional[int],
         polygon_vertices: Optional[int],
+        gif_area_filename: Optional[str],
+        gif_gral_filename: Optional[str],
     ) -> None:
         """Append one terminal alert-generation job."""
 

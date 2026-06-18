@@ -20,6 +20,8 @@ class JobRow:  # pylint: disable=too-many-instance-attributes
     render_ms: Optional[int] = None
     persist_ms: Optional[int] = None
     polygon_vertices: Optional[int] = None
+    gif_area_filename: Optional[str] = None
+    gif_gral_filename: Optional[str] = None
 
 
 @dataclass(frozen=True, slots=True)

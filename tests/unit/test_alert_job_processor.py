@@ -200,6 +200,8 @@ async def test_records_done_job_to_metrics():
             "filter_ms": 20,
             "render_ms": 800,
             "persist_ms": 15,
+            "gif_area_filename": "aviso_260618100000.gif",
+            "gif_gral_filename": "avi_gral_260618100000.gif",
         }
     )
     recorder = MagicMock()
@@ -220,6 +222,8 @@ async def test_records_done_job_to_metrics():
         assert kwargs["filter_ms"] == 20
         assert kwargs["persist_ms"] == 15
         assert kwargs["polygon_vertices"] == 4  # GEOMETRY outer ring has 4 points
+        assert kwargs["gif_area_filename"] == "aviso_260618100000.gif"
+        assert kwargs["gif_gral_filename"] == "avi_gral_260618100000.gif"
     finally:
         await proc.shutdown(drain=False, timeout=1)
 
