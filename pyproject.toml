@@ -60,7 +60,7 @@ ignore_missing_imports = true
 init-hook = "import sys; sys.path.insert(0, 'src')"
 # Alembic migration scripts are generated boilerplate; op/context members are
 # attached dynamically, triggering false-positive no-member warnings.
-ignore-paths = [".*metrics_migrations.*"]
+ignore-paths = [".*_migrations.*"]
 
 [tool.pylint.similarities]
 min-similarity-lines = 8

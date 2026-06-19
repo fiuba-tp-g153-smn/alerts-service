@@ -111,10 +111,11 @@ async def get_alert_job(
     - **alert_id**: present on `done` (the generated `IdAviso_temporal`)
     - **error_code** / **error**: present on `failed` (e.g. `area_too_large`)
 
-    Job records are kept in memory and may be evicted or lost on restart; an
-    unknown `job_id` returns `404`.
+    Live jobs come from the in-memory registry; terminal (done/failed) jobs are
+    recovered from the durable metrics store after the registry evicts them or the
+    process restarts. A truly unknown `job_id` returns `404`.
     """
-    record = processor.get_status(job_id)
+    record = await processor.get_status_durable(job_id)
     if record is None:
         raise HTTPException(status_code=404, detail="Unknown job_id")
     return AlertJobStatus(

@@ -12,14 +12,16 @@ from fastapi.staticfiles import StaticFiles
 from container import (
     get_geo_repo,
     get_history_repo,
+    get_job_store,
     get_metrics_repo,
     get_mysql_repo,
     get_singleton_alert_service,
     get_taviso_repo,
 )
 from controller import alerts, general, intersections, metrics
-from db.migrate import ensure_migrations
+from db.migrate import ensure_job_migrations, ensure_metrics_migrations
 from dependencies import logger, settings
+from migration_helpers import copy_legacy_job_history
 from scheduler import setup_scheduler
 from services.alert_job_processor import AlertJobProcessor
 from services.metrics_sampler import MetricsSampler
@@ -55,11 +57,18 @@ async def lifespan(_app: FastAPI):
     geo_repo = get_geo_repo()
     geo_repo.start_eviction_loop()
 
-    # Metrics store: migrate the local SQLite DB, then open it. Disabled via
-    # settings → no recording, no sampler, processor gets metrics=None.
+    # Durable job-history store (always on): migrate, then one-time copy any legacy
+    # rows from the metrics DB *before* the metrics migration drops that table.
+    await asyncio.to_thread(ensure_job_migrations, settings)
+    await asyncio.to_thread(copy_legacy_job_history, settings, logger)
+    job_store = get_job_store()
+    await job_store.connect()
+
+    # Processor-metrics store (telemetry; optional): migrate + open only when
+    # enabled. Disabled → no sampler; job status/history still work via the store.
     metrics_repo = None
     if settings.metrics_enabled:
-        await asyncio.to_thread(ensure_migrations, settings)
+        await asyncio.to_thread(ensure_metrics_migrations, settings)
         metrics_repo = get_metrics_repo()
         await metrics_repo.connect()
 
@@ -72,7 +81,7 @@ async def lifespan(_app: FastAPI):
         workers=settings.alert_job_workers,
         job_timeout=settings.alert_job_timeout_seconds,
         supervisor_interval=settings.alert_supervisor_interval_seconds,
-        metrics=metrics_repo,
+        job_store=job_store,
     )
     processor.start()
     _app.state.alert_job_processor = processor
@@ -109,10 +118,11 @@ async def lifespan(_app: FastAPI):
     # a connection to the external database just to close it.
     if get_taviso_repo.cache_info().currsize:
         get_taviso_repo().close()
-    # Close the metrics store last — after the processor drained, so a draining
-    # job's record_job still has an open store.
+    # Close the local stores last — after the processor drained, so a draining
+    # job's record_job still has an open job store.
     if metrics_repo is not None:
         await metrics_repo.close()
+    await job_store.close()
     logger.info("Database connections closed.")
 
 

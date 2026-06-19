@@ -71,7 +71,10 @@ class Settings:  # pylint: disable=too-many-instance-attributes,too-few-public-m
     alert_supervisor_interval_seconds: float = 30.0
     alert_job_shutdown_seconds: float = 160.0
 
-    # Metrics store (local SQLite, dashboard observability)
+    # Job-history store (local SQLite, always-on durable job records).
+    jobs_db_path: str = ""
+
+    # Metrics store (local SQLite, optional dashboard observability / telemetry)
     metrics_enabled: bool = True
     metrics_db_path: str = ""
     metrics_sample_interval_seconds: float = 60.0
@@ -163,6 +166,9 @@ class Settings:  # pylint: disable=too-many-instance-attributes,too-few-public-m
 
         self.output_dir = os.getenv("OUTPUT_DIR", self.output_dir)
         self.alert_cache_dir = os.getenv("ALERT_CACHE_DIR", self.alert_cache_dir)
+        self.jobs_db_path = os.getenv(
+            "JOBS_DB_PATH", os.path.join(self.data_dir, "jobs.sqlite")
+        )
         self.metrics_db_path = os.getenv(
             "METRICS_DB_PATH", os.path.join(self.data_dir, "metrics.sqlite")
         )
@@ -194,6 +200,7 @@ class Settings:  # pylint: disable=too-many-instance-attributes,too-few-public-m
             self.alert_supervisor_interval_seconds,
         )
         logger.info("ALERT_JOB_SHUTDOWN_SECONDS: %s", self.alert_job_shutdown_seconds)
+        logger.info("JOBS_DB_PATH: %s", self.jobs_db_path)
         logger.info("METRICS_ENABLED: %s", self.metrics_enabled)
         logger.info("METRICS_DB_PATH: %s", self.metrics_db_path)
         logger.info(

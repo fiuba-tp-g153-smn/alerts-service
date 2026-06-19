@@ -51,6 +51,7 @@ class JobMetric(BaseModel):
     outcome: str
     error_code: Optional[str] = None
     error_message: Optional[str] = None
+    alert_id: Optional[int] = None
     affected_departments: Optional[int] = None
     intersection_ms: Optional[int] = None
     filter_ms: Optional[int] = None

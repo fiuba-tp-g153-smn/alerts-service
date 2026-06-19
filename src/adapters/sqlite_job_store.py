@@ -1,70 +1,38 @@
-"""SQLite-backed store for alert-generation metrics.
+"""SQLite-backed durable store for terminal alert-generation jobs (job history).
 
-Mirrors the data-service metrics store: a single ``sqlite3.Connection`` in WAL
-mode, all access serialized by ``_access_lock`` and offloaded via
-``asyncio.to_thread`` so the event loop never blocks. The schema is owned by
-Alembic (``src/db/metrics_migrations``) and applied at startup by
-``db.migrate.ensure_migrations`` — this store only opens the migrated DB.
+Always-on (independent of the optional metrics store). Schema owned by Alembic
+(``src/db/job_migrations``). Self-prunes on write (time retention + row cap) so it
+stays bounded without an external pruner.
 """
 
 import asyncio
 import logging
 import sqlite3
-from pathlib import Path
+from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 
-from domain.metrics import (
-    JobHistoryBucket,
-    JobRow,
-    JobsAggregate,
-    ProcessorSampleRow,
-)
-from ports.metrics_repository import IAlertMetricsRepository
+from adapters._sqlite_store import SqliteStore
+from domain.metrics import JobHistoryBucket, JobRow, JobsAggregate
+from ports.job_store import IJobStore
 
 logger = logging.getLogger(__name__)
 
-# Capped independently by ``prune_to_max_rows``; each has an autoincrement ``id``
-# PK, so the newest rows always have the highest ids.
-_CAPPED_TABLES = ("alert_jobs", "processor_samples")
+# Column list for reading an ``alert_jobs`` row into a ``JobRow`` (order matches
+# ``_to_job_row``). Shared by the recent-jobs window query and the by-id lookup.
+_JOB_COLUMNS = (
+    "job_id, phenomenon_code, finished_at, duration_ms, outcome, error_code,"
+    " error_message, alert_id, affected_departments, intersection_ms, filter_ms,"
+    " render_ms, persist_ms, polygon_vertices, gif_area_filename, gif_gral_filename"
+)
 
 
-class SqliteAlertMetricsRepository(IAlertMetricsRepository):
-    """Async wrapper over a single ``sqlite3.Connection`` persisting metrics."""
+class SqliteJobStore(SqliteStore, IJobStore):
+    """Async wrapper over one ``sqlite3.Connection`` persisting job history."""
 
-    def __init__(self, db_path: str):
-        self._db_path = db_path
-        self._conn: Optional[sqlite3.Connection] = None
-        self._access_lock = asyncio.Lock()
-
-    async def connect(self) -> None:
-        """Open the SQLite connection (schema is owned by Alembic migrations)."""
-        if self._conn is not None:
-            return
-        Path(self._db_path).parent.mkdir(parents=True, exist_ok=True)
-        await asyncio.to_thread(self._open)
-        logger.info("Alert metrics store opened at %s", self._db_path)
-
-    def _open(self) -> None:
-        conn = sqlite3.connect(
-            self._db_path, check_same_thread=False, isolation_level=None
-        )
-        conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA journal_mode=WAL;")
-        conn.execute("PRAGMA synchronous=NORMAL;")
-        self._conn = conn
-
-    async def close(self) -> None:
-        """Close the SQLite connection."""
-        if self._conn is None:
-            return
-        await asyncio.to_thread(self._conn.close)
-        self._conn = None
-        logger.info("Alert metrics store closed")
-
-    def _require_conn(self) -> sqlite3.Connection:
-        if self._conn is None:
-            raise RuntimeError("SqliteAlertMetricsRepository not connected")
-        return self._conn
+    def __init__(self, db_path: str, retention_days: int = 0, max_rows: int = 0):
+        super().__init__(db_path, "Alert job store")
+        self._retention_days = retention_days
+        self._max_rows = max_rows
 
     # ============== Writes ==============
 
@@ -78,6 +46,7 @@ class SqliteAlertMetricsRepository(IAlertMetricsRepository):
         outcome: str,
         error_code: Optional[str],
         error_message: Optional[str],
+        alert_id: Optional[int],
         affected_departments: Optional[int],
         intersection_ms: Optional[int],
         filter_ms: Optional[int],
@@ -95,6 +64,7 @@ class SqliteAlertMetricsRepository(IAlertMetricsRepository):
             outcome,
             error_code,
             error_message,
+            alert_id,
             affected_departments,
             intersection_ms,
             filter_ms,
@@ -105,92 +75,63 @@ class SqliteAlertMetricsRepository(IAlertMetricsRepository):
             gif_gral_filename,
         )
         async with self._access_lock:
-            await asyncio.to_thread(self._record_job_sync, row)
+            await asyncio.to_thread(self._record_and_maintain, row)
 
-    def _record_job_sync(self, row: tuple) -> None:
-        self._require_conn().execute(
+    def _record_and_maintain(self, row: tuple) -> None:
+        conn = self._require_conn()
+        conn.execute(
             """
             INSERT INTO alert_jobs
                 (job_id, phenomenon_code, finished_at, duration_ms, outcome,
-                 error_code, error_message, affected_departments, intersection_ms,
-                 filter_ms, render_ms, persist_ms, polygon_vertices,
-                 gif_area_filename, gif_gral_filename)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 error_code, error_message, alert_id, affected_departments,
+                 intersection_ms, filter_ms, render_ms, persist_ms,
+                 polygon_vertices, gif_area_filename, gif_gral_filename)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             row,
         )
-
-    async def record_sample(  # pylint: disable=too-many-arguments
-        self,
-        *,
-        sampled_at: str,
-        queue_depth: int,
-        workers: int,
-        respawns: int,
-        jobs_queued_total: int,
-        jobs_done_total: int,
-        jobs_failed_total: int,
-        pending_alerts: int,
-    ) -> None:
-        row = (
-            sampled_at,
-            queue_depth,
-            workers,
-            respawns,
-            jobs_queued_total,
-            jobs_done_total,
-            jobs_failed_total,
-            pending_alerts,
-        )
-        async with self._access_lock:
-            await asyncio.to_thread(self._record_sample_sync, row)
-
-    def _record_sample_sync(self, row: tuple) -> None:
-        self._require_conn().execute(
-            """
-            INSERT INTO processor_samples
-                (sampled_at, queue_depth, workers, respawns, jobs_queued_total,
-                 jobs_done_total, jobs_failed_total, pending_alerts)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            row,
-        )
+        # Self-maintain so the store stays bounded without an external pruner.
+        if self._retention_days > 0:
+            cutoff = (
+                datetime.now(timezone.utc) - timedelta(days=self._retention_days)
+            ).isoformat()
+            conn.execute("DELETE FROM alert_jobs WHERE finished_at < ?", (cutoff,))
+        if self._max_rows > 0:
+            self._cap_sync(conn, self._max_rows)
 
     async def prune(self, before_iso: str) -> None:
         async with self._access_lock:
             await asyncio.to_thread(self._prune_sync, before_iso)
 
     def _prune_sync(self, before_iso: str) -> None:
-        conn = self._require_conn()
-        conn.execute("DELETE FROM alert_jobs WHERE finished_at < ?", (before_iso,))
-        conn.execute(
-            "DELETE FROM processor_samples WHERE sampled_at < ?", (before_iso,)
+        self._require_conn().execute(
+            "DELETE FROM alert_jobs WHERE finished_at < ?", (before_iso,)
         )
 
     async def prune_to_max_rows(self, max_rows: int) -> int:
         async with self._access_lock:
-            return await asyncio.to_thread(self._prune_to_max_rows_sync, max_rows)
+            return await asyncio.to_thread(self._cap, max_rows)
 
-    def _prune_to_max_rows_sync(self, max_rows: int) -> int:
+    def _cap(self, max_rows: int) -> int:
+        return self._cap_sync(self._require_conn(), max_rows)
+
+    @staticmethod
+    def _cap_sync(conn: sqlite3.Connection, max_rows: int) -> int:
+        """Delete all but the newest ``max_rows`` rows (by autoincrement id)."""
         if max_rows <= 0:
             return 0
-        conn = self._require_conn()
-        total = 0
-        for table in _CAPPED_TABLES:
-            row = conn.execute(
-                f"SELECT id FROM {table} ORDER BY id DESC LIMIT 1 OFFSET ?",
-                (max_rows - 1,),
-            ).fetchone()
-            if row is None:
-                continue
-            total += conn.execute(
-                f"DELETE FROM {table} WHERE id < ?", (row["id"],)
-            ).rowcount
-        if total:
-            logger.info(
-                "Pruned %d metrics row(s); capped each table at %d", total, max_rows
-            )
-        return total
+        row = conn.execute(
+            "SELECT id FROM alert_jobs ORDER BY id DESC LIMIT 1 OFFSET ?",
+            (max_rows - 1,),
+        ).fetchone()
+        if row is None:
+            return 0
+        deleted = conn.execute(
+            "DELETE FROM alert_jobs WHERE id < ?", (row["id"],)
+        ).rowcount
+        if deleted:
+            logger.info("Pruned %d job row(s); capped at %d", deleted, max_rows)
+        return deleted
 
     # ============== Reads ==============
 
@@ -262,10 +203,7 @@ class SqliteAlertMetricsRepository(IAlertMetricsRepository):
 
     def _get_recent_jobs_sync(self, since_iso: str, limit: int) -> List[JobRow]:
         sql = (
-            "SELECT job_id, phenomenon_code, finished_at, duration_ms, outcome,"
-            " error_code, error_message, affected_departments, intersection_ms,"
-            " filter_ms, render_ms, persist_ms, polygon_vertices, gif_area_filename,"
-            " gif_gral_filename FROM alert_jobs"
+            f"SELECT {_JOB_COLUMNS} FROM alert_jobs"
             " WHERE finished_at >= ? ORDER BY finished_at DESC"
         )
         params: list = [since_iso]
@@ -274,6 +212,22 @@ class SqliteAlertMetricsRepository(IAlertMetricsRepository):
             params.append(limit)
         rows = self._require_conn().execute(sql, params).fetchall()
         return [self._to_job_row(r) for r in rows]
+
+    async def get_job_by_id(self, job_id: str) -> Optional[JobRow]:
+        async with self._access_lock:
+            return await asyncio.to_thread(self._get_job_by_id_sync, job_id)
+
+    def _get_job_by_id_sync(self, job_id: str) -> Optional[JobRow]:
+        row = (
+            self._require_conn()
+            .execute(
+                f"SELECT {_JOB_COLUMNS} FROM alert_jobs"
+                " WHERE job_id = ? ORDER BY id DESC LIMIT 1",
+                (job_id,),
+            )
+            .fetchone()
+        )
+        return self._to_job_row(row) if row else None
 
     async def get_jobs_history(
         self, since_iso: str, bucket: str
@@ -311,36 +265,6 @@ class SqliteAlertMetricsRepository(IAlertMetricsRepository):
             for r in rows
         ]
 
-    async def get_latest_sample(self) -> Optional[ProcessorSampleRow]:
-        async with self._access_lock:
-            return await asyncio.to_thread(self._get_latest_sample_sync)
-
-    def _get_latest_sample_sync(self) -> Optional[ProcessorSampleRow]:
-        row = (
-            self._require_conn()
-            .execute("SELECT * FROM processor_samples ORDER BY id DESC LIMIT 1")
-            .fetchone()
-        )
-        return self._to_sample_row(row) if row else None
-
-    async def get_processor_history(self, since_iso: str) -> List[ProcessorSampleRow]:
-        async with self._access_lock:
-            return await asyncio.to_thread(self._get_processor_history_sync, since_iso)
-
-    def _get_processor_history_sync(self, since_iso: str) -> List[ProcessorSampleRow]:
-        rows = (
-            self._require_conn()
-            .execute(
-                "SELECT * FROM processor_samples WHERE sampled_at >= ?"
-                " ORDER BY sampled_at",
-                (since_iso,),
-            )
-            .fetchall()
-        )
-        return [self._to_sample_row(r) for r in rows]
-
-    # ============== Row mappers ==============
-
     @staticmethod
     def _to_job_row(r: sqlite3.Row) -> JobRow:
         def _opt(key: str) -> Optional[int]:
@@ -359,6 +283,7 @@ class SqliteAlertMetricsRepository(IAlertMetricsRepository):
             outcome=str(r["outcome"]),
             error_code=r["error_code"],
             error_message=_opt_str("error_message"),
+            alert_id=_opt("alert_id"),
             affected_departments=_opt("affected_departments"),
             intersection_ms=_opt("intersection_ms"),
             filter_ms=_opt("filter_ms"),
@@ -367,17 +292,4 @@ class SqliteAlertMetricsRepository(IAlertMetricsRepository):
             polygon_vertices=_opt("polygon_vertices"),
             gif_area_filename=_opt_str("gif_area_filename"),
             gif_gral_filename=_opt_str("gif_gral_filename"),
-        )
-
-    @staticmethod
-    def _to_sample_row(r: sqlite3.Row) -> ProcessorSampleRow:
-        return ProcessorSampleRow(
-            sampled_at=str(r["sampled_at"]),
-            queue_depth=int(r["queue_depth"]),
-            workers=int(r["workers"]),
-            respawns=int(r["respawns"]),
-            jobs_queued_total=int(r["jobs_queued_total"]),
-            jobs_done_total=int(r["jobs_done_total"]),
-            jobs_failed_total=int(r["jobs_failed_total"]),
-            pending_alerts=int(r["pending_alerts"]),
         )

@@ -12,7 +12,7 @@ from datetime import datetime, timedelta, timezone
 from logging import Logger
 from typing import Optional
 
-from ports.metrics_repository import IAlertMetricsRepository
+from ports.metrics_repository import IProcessorMetricsRepository
 from ports.mysql_repository import IMySQLRepository
 from services.alert_job_processor import AlertJobProcessor
 from settings import Settings
@@ -25,7 +25,7 @@ class MetricsSampler:
         self,
         processor: AlertJobProcessor,
         mysql_repo: IMySQLRepository,
-        metrics: IAlertMetricsRepository,
+        metrics: IProcessorMetricsRepository,
         settings: Settings,
         logger: Logger,
     ):

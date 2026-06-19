@@ -5,9 +5,22 @@ import logging
 from unittest.mock import AsyncMock, MagicMock
 
 from domain.alert_job import AlertJobRecord, JobStatus
+from domain.metrics import JobRow
 from domain.models import AreaTooLargeError
 from services import alert_job_processor as ajp
 from services.alert_job_processor import AlertJobProcessor
+
+
+def _job_row(**over) -> JobRow:
+    payload = dict(
+        job_id="j",
+        phenomenon_code=1,
+        finished_at="2026-06-18T10:00:00+00:00",
+        duration_ms=500,
+        outcome="failed",
+    )
+    payload.update(over)
+    return JobRow(**payload)
 
 GEOMETRY = {"type": "Polygon", "coordinates": [[[0, 0], [1, 0], [1, 1], [0, 0]]]}
 
@@ -207,7 +220,7 @@ async def test_records_done_job_to_metrics():
     recorder = MagicMock()
     recorder.record_job = AsyncMock()
     proc = AlertJobProcessor(
-        service, logging.getLogger("test"), 16, 1, metrics=recorder
+        service, logging.getLogger("test"), 16, 1, job_store=recorder
     )
     proc.start()
     try:
@@ -225,6 +238,7 @@ async def test_records_done_job_to_metrics():
         assert kwargs["gif_area_filename"] == "aviso_260618100000.gif"
         assert kwargs["gif_gral_filename"] == "avi_gral_260618100000.gif"
         assert kwargs["error_message"] is None  # done jobs carry no error
+        assert kwargs["alert_id"] == 9
     finally:
         await proc.shutdown(drain=False, timeout=1)
 
@@ -234,7 +248,7 @@ async def test_records_failed_job_to_metrics():
     recorder = MagicMock()
     recorder.record_job = AsyncMock()
     proc = AlertJobProcessor(
-        service, logging.getLogger("test"), 16, 1, metrics=recorder
+        service, logging.getLogger("test"), 16, 1, job_store=recorder
     )
     proc.start()
     try:
@@ -263,6 +277,59 @@ async def test_stats_reports_counters():
         assert stats["workers"] == 1
     finally:
         await proc.shutdown(drain=False, timeout=1)
+
+
+async def test_get_status_durable_returns_live_registry_record():
+    proc = AlertJobProcessor(_make_service(), logging.getLogger("test"), 16, 0)
+    proc._set_status("live", AlertJobRecord(JobStatus.PROCESSING))
+    rec = await proc.get_status_durable("live")
+    assert rec is not None and rec.status is JobStatus.PROCESSING
+
+
+async def test_get_status_durable_falls_back_to_metrics_store():
+    metrics = MagicMock()
+    metrics.get_job_by_id = AsyncMock(
+        return_value=_job_row(
+            outcome="failed",
+            error_code="area_too_large",
+            error_message="Affected-area HTML is 2443 characters, exceeds 2000.",
+            alert_id=None,
+        )
+    )
+    proc = AlertJobProcessor(
+        _make_service(), logging.getLogger("test"), 16, 0, job_store=metrics
+    )
+    # Not in the registry (evicted / post-restart) → recovered from the store.
+    rec = await proc.get_status_durable("gone")
+    assert rec is not None
+    assert rec.status is JobStatus.FAILED
+    assert rec.error_code == "area_too_large"
+    assert rec.error == "Affected-area HTML is 2443 characters, exceeds 2000."
+    metrics.get_job_by_id.assert_awaited_once_with("gone")
+
+
+async def test_get_status_durable_done_carries_alert_id():
+    metrics = MagicMock()
+    metrics.get_job_by_id = AsyncMock(return_value=_job_row(outcome="done", alert_id=7))
+    proc = AlertJobProcessor(
+        _make_service(), logging.getLogger("test"), 16, 0, job_store=metrics
+    )
+    rec = await proc.get_status_durable("gone")
+    assert rec is not None and rec.status is JobStatus.DONE and rec.alert_id == 7
+
+
+async def test_get_status_durable_none_when_no_metrics_or_not_found():
+    # No metrics store configured → registry miss returns None (no fallback).
+    proc = AlertJobProcessor(_make_service(), logging.getLogger("test"), 16, 0)
+    assert await proc.get_status_durable("gone") is None
+
+    # Metrics store present but the job isn't there either → None.
+    metrics = MagicMock()
+    metrics.get_job_by_id = AsyncMock(return_value=None)
+    proc2 = AlertJobProcessor(
+        _make_service(), logging.getLogger("test"), 16, 0, job_store=metrics
+    )
+    assert await proc2.get_status_durable("gone") is None
 
 
 async def test_registry_is_bounded(monkeypatch):

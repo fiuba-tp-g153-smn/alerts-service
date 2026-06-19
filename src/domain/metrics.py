@@ -15,6 +15,7 @@ class JobRow:  # pylint: disable=too-many-instance-attributes
     outcome: str  # 'done' | 'failed'
     error_code: Optional[str] = None
     error_message: Optional[str] = None
+    alert_id: Optional[int] = None  # MySQL IdAviso_temporal (done jobs)
     affected_departments: Optional[int] = None
     intersection_ms: Optional[int] = None
     filter_ms: Optional[int] = None

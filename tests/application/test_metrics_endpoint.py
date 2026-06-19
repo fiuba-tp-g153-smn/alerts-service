@@ -1,9 +1,14 @@
-"""Endpoint tests for /metrics/* using fake repositories (no DB, no lifespan)."""
+"""Endpoint tests for /metrics/* using fake stores (no DB, no lifespan)."""
 
 import pytest
 from fastapi.testclient import TestClient
 
-from container import get_history_repo, get_metrics_repo, get_mysql_repo
+from container import (
+    get_history_repo,
+    get_job_store,
+    get_metrics_repo,
+    get_mysql_repo,
+)
 from domain.metrics import (
     JobHistoryBucket,
     JobRow,
@@ -19,8 +24,8 @@ class FakeMysqlRepo:
         return (7, 42)  # live pending count = 7
 
 
-class FakeMetricsRepo:
-    """Duck-typed metrics repo serving canned query results."""
+class FakeJobStore:
+    """Duck-typed job store serving canned job aggregates/rows."""
 
     async def get_summary(self, since_iso):
         return JobsAggregate(
@@ -34,18 +39,6 @@ class FakeMetricsRepo:
             avg_filter_ms=20.0,
             avg_render_ms=900.0,
             avg_persist_ms=10.0,
-        )
-
-    async def get_latest_sample(self):
-        return ProcessorSampleRow(
-            sampled_at="2026-06-17T10:00:00+00:00",
-            queue_depth=1,
-            workers=2,
-            respawns=0,
-            jobs_queued_total=3,
-            jobs_done_total=2,
-            jobs_failed_total=1,
-            pending_alerts=4,
         )
 
     async def get_recent_jobs(self, since_iso, limit):
@@ -65,6 +58,7 @@ class FakeMetricsRepo:
                 gif_area_filename="aviso_260617100000.gif",
                 gif_gral_filename="avi_gral_260617100000.gif",
                 error_message="Affected-area HTML is 2443 characters, exceeds 2000.",
+                alert_id=77,
             )
         ]
 
@@ -74,6 +68,22 @@ class FakeMetricsRepo:
                 bucket="2026-06-17T10", done=2, failed=1, avg_duration_ms=1500.0
             )
         ]
+
+
+class FakeMetricsRepo:
+    """Duck-typed processor-metrics store serving canned samples."""
+
+    async def get_latest_sample(self):
+        return ProcessorSampleRow(
+            sampled_at="2026-06-17T10:00:00+00:00",
+            queue_depth=1,
+            workers=2,
+            respawns=0,
+            jobs_queued_total=3,
+            jobs_done_total=2,
+            jobs_failed_total=1,
+            pending_alerts=4,
+        )
 
     async def get_processor_history(self, since_iso):
         return [await self.get_latest_sample()]
@@ -97,10 +107,12 @@ class FakeHistoryRepo:
 def client():
     from main import app
 
+    app.dependency_overrides[get_job_store] = FakeJobStore
     app.dependency_overrides[get_metrics_repo] = FakeMetricsRepo
     app.dependency_overrides[get_history_repo] = FakeHistoryRepo
     app.dependency_overrides[get_mysql_repo] = FakeMysqlRepo
     yield TestClient(app)
+    app.dependency_overrides.pop(get_job_store, None)
     app.dependency_overrides.pop(get_metrics_repo, None)
     app.dependency_overrides.pop(get_history_repo, None)
     app.dependency_overrides.pop(get_mysql_repo, None)
@@ -111,11 +123,12 @@ def test_summary(client):
     assert resp.status_code == 200
     body = resp.json()
     assert body["window_hours"] == 24
-    assert body["jobs"]["total"] == 3
+    assert body["jobs"]["total"] == 3  # from the job store
     assert body["jobs"]["failure_breakdown"] == {"timeout": 1}
     assert body["jobs"]["avg_filter_ms"] == 20.0
     assert body["jobs"]["avg_persist_ms"] == 10.0
-    # Live pending (7 from the mysql fake), NOT the sampled value (4).
+    # Processor snapshot from the metrics store; pending overridden live (7), not 4.
+    assert body["processor"]["workers"] == 2
     assert body["processor"]["pending_alerts"] == 7
 
 
@@ -131,6 +144,7 @@ def test_jobs(client):
     assert body[0]["gif_area_filename"] == "aviso_260617100000.gif"
     assert body[0]["gif_gral_filename"] == "avi_gral_260617100000.gif"
     assert body[0]["error_message"] == "Affected-area HTML is 2443 characters, exceeds 2000."
+    assert body[0]["alert_id"] == 77
 
 
 def test_jobs_history(client):

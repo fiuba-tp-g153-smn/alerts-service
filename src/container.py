@@ -10,9 +10,11 @@ from adapters.geo_layer_repository import FileSystemGeoLayerRepository
 from adapters.mysql_alerts import MySQLAlertsRepository
 from adapters.mysql_taviso import MySQLTavisoReadRepository
 from adapters.sqlite_history import SqliteHistoryRepository
-from adapters.sqlite_metrics import SqliteAlertMetricsRepository
+from adapters.sqlite_job_store import SqliteJobStore
+from adapters.sqlite_processor_metrics import SqliteProcessorMetricsRepository
 from initializers import init_logger
-from ports.metrics_repository import IAlertMetricsRepository
+from ports.job_store import IJobStore
+from ports.metrics_repository import IProcessorMetricsRepository
 from ports.mysql_repository import IMySQLRepository
 from ports.taviso_repository import ITavisoReadRepository
 from services.alert_generation_service import AlertGenerationService
@@ -57,10 +59,21 @@ def get_history_repo() -> SqliteHistoryRepository:
 
 
 @lru_cache
-def get_metrics_repo() -> IAlertMetricsRepository:
-    """Return a singleton SQLite metrics repository (schema owned by migrations)."""
+def get_job_store() -> IJobStore:
+    """Return the singleton always-on durable job store (schema owned by migrations)."""
     settings = get_settings()
-    return SqliteAlertMetricsRepository(settings.metrics_db_path)
+    return SqliteJobStore(
+        settings.jobs_db_path,
+        retention_days=settings.metrics_retention_days,
+        max_rows=settings.metrics_max_rows,
+    )
+
+
+@lru_cache
+def get_metrics_repo() -> IProcessorMetricsRepository:
+    """Return the singleton SQLite processor-metrics store (schema via migrations)."""
+    settings = get_settings()
+    return SqliteProcessorMetricsRepository(settings.metrics_db_path)
 
 
 @lru_cache

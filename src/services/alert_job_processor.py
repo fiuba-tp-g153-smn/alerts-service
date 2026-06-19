@@ -10,7 +10,7 @@ from uuid import uuid4
 
 from domain.alert_job import AlertJob, AlertJobRecord, JobStatus
 from domain.models import AreaTooLargeError
-from ports.metrics_repository import IAlertMetricsRepository
+from ports.job_store import IJobStore
 from services.alert_generation_service import AlertGenerationService
 
 # Max number of job status records kept in memory. Bounds growth in a
@@ -39,19 +39,20 @@ class AlertJobProcessor:  # pylint: disable=too-many-instance-attributes
         workers: int,
         job_timeout: float = 150.0,
         supervisor_interval: float = 30.0,
-        metrics: Optional[IAlertMetricsRepository] = None,
+        job_store: Optional[IJobStore] = None,
     ):
         """Initialize with the alert service, logger and queue/pool sizing.
 
-        ``metrics`` (optional) records each terminal job; when None, recording is
-        a no-op (keeps the processor usable without the metrics store).
+        ``job_store`` (the durable job-history store) records each terminal job and
+        backs the durable status lookup; when None, recording/lookup is a no-op
+        (keeps the processor usable without the store, e.g. in unit tests).
         """
         self._alert_service = alert_service
         self._logger = logger
         self._num_workers = workers
         self._job_timeout = job_timeout
         self._supervisor_interval = supervisor_interval
-        self._metrics = metrics
+        self._job_store = job_store
         self._queue: asyncio.Queue[AlertJob] = asyncio.Queue(maxsize=maxsize)
         self._registry: "OrderedDict[str, AlertJobRecord]" = OrderedDict()
         self._workers: list[asyncio.Task] = []
@@ -95,8 +96,34 @@ class AlertJobProcessor:  # pylint: disable=too-many-instance-attributes
         return job_id
 
     def get_status(self, job_id: str) -> Optional[AlertJobRecord]:
-        """Return the status record for a job, or None if unknown."""
+        """Return the in-memory status record for a job, or None if unknown."""
         return self._registry.get(job_id)
+
+    async def get_status_durable(self, job_id: str) -> Optional[AlertJobRecord]:
+        """Status for a job, falling back to the durable metrics store on a miss.
+
+        The in-memory registry is bounded and process-lifetime, so it loses a
+        job's status on eviction or restart. Terminal (done/failed) jobs are also
+        persisted to the metrics store; recover them from there so the status
+        endpoint survives both. Best-effort: a metrics-store error never breaks
+        status polling (the registry remains the source of truth for live jobs).
+        """
+        record = self._registry.get(job_id)
+        if record is not None or self._job_store is None:
+            return record
+        try:
+            row = await self._job_store.get_job_by_id(job_id)
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            self._logger.warning("Durable job-status lookup failed: %s", exc)
+            return None
+        if row is None:
+            return None
+        return AlertJobRecord(
+            status=JobStatus(row.outcome),
+            alert_id=row.alert_id,
+            error_code=row.error_code,
+            error=row.error_message,
+        )
 
     def stats(self) -> dict:
         """Return a live snapshot of queue/worker health and lifetime counters."""
@@ -232,12 +259,12 @@ class AlertJobProcessor:  # pylint: disable=too-many-instance-attributes
         error_message: Optional[str],
         result: Optional[dict],
     ) -> None:
-        """Persist one terminal job to the metrics store (best-effort)."""
-        if self._metrics is None:
+        """Persist one terminal job to the durable job store (best-effort)."""
+        if self._job_store is None:
             return
         result = result or {}
         try:
-            await self._metrics.record_job(
+            await self._job_store.record_job(
                 job_id=job.job_id,
                 phenomenon_code=job.phenomenon_code,
                 finished_at=datetime.now(timezone.utc).isoformat(),
@@ -245,6 +272,7 @@ class AlertJobProcessor:  # pylint: disable=too-many-instance-attributes
                 outcome=outcome,
                 error_code=error_code,
                 error_message=(error_message or "")[:2000] or None,
+                alert_id=result.get("alert_id"),
                 affected_departments=result.get("affected_departments_count"),
                 intersection_ms=result.get("intersection_ms"),
                 filter_ms=result.get("filter_ms"),
@@ -255,8 +283,8 @@ class AlertJobProcessor:  # pylint: disable=too-many-instance-attributes
                 gif_gral_filename=result.get("gif_gral_filename"),
             )
         except Exception as exc:  # pylint: disable=broad-exception-caught
-            # Metrics must never break job processing.
-            self._logger.warning("Failed to record job metrics: %s", exc)
+            # Recording must never break job processing.
+            self._logger.warning("Failed to record job history: %s", exc)
 
     @staticmethod
     def _polygon_vertices(geometry: dict) -> Optional[int]:

@@ -7,7 +7,12 @@ from typing import List
 
 from fastapi import APIRouter, Depends, Query
 
-from container import get_history_repo, get_metrics_repo, get_mysql_repo
+from container import (
+    get_history_repo,
+    get_job_store,
+    get_metrics_repo,
+    get_mysql_repo,
+)
 from controller.metrics_schemas import (
     JobHistoryPoint,
     JobMetric,
@@ -18,7 +23,8 @@ from controller.metrics_schemas import (
     ProcessorStats,
 )
 from ports.history_repository import IHistoryRepository
-from ports.metrics_repository import IAlertMetricsRepository
+from ports.job_store import IJobStore
+from ports.metrics_repository import IProcessorMetricsRepository
 from ports.mysql_repository import IMySQLRepository
 
 router = APIRouter(prefix="/metrics", tags=["Metrics"])
@@ -41,14 +47,20 @@ def _since_iso(hours: int) -> str:
 )
 async def get_summary(
     hours: int = Query(24, ge=0, description="Window in hours (0 = all time)"),
-    metrics: IAlertMetricsRepository = Depends(get_metrics_repo),
+    jobs: IJobStore = Depends(get_job_store),
+    metrics: IProcessorMetricsRepository = Depends(get_metrics_repo),
     mysql_repo: IMySQLRepository = Depends(get_mysql_repo),
 ) -> MetricsSummary:
     """Windowed job aggregates (totals, failure breakdown, per-stage durations)
     plus the latest processor snapshot. ``pending_alerts`` is read live (not from
     the periodic sample) so it is always current."""
-    agg = await metrics.get_summary(_since_iso(hours))
-    latest = await metrics.get_latest_sample()
+    agg = await jobs.get_summary(_since_iso(hours))
+    # Processor telemetry is best-effort: if metrics is disabled/unavailable the
+    # job KPIs still render (just without the processor snapshot).
+    try:
+        latest = await metrics.get_latest_sample()
+    except Exception:  # pylint: disable=broad-exception-caught
+        latest = None
     processor = ProcessorStats(**asdict(latest)) if latest else ProcessorStats()
     # Live pending count (the sampled value can be up to one interval stale).
     pending, _ = await asyncio.to_thread(mysql_repo.get_pending_alerts_etag)
@@ -66,10 +78,10 @@ async def get_summary(
 async def get_jobs(
     hours: int = Query(24, ge=0, description="Window in hours (0 = all time)"),
     limit: int = Query(200, ge=0, le=5000, description="Max rows (0 = no limit)"),
-    metrics: IAlertMetricsRepository = Depends(get_metrics_repo),
+    jobs: IJobStore = Depends(get_job_store),
 ) -> List[JobMetric]:
     """Recent terminal jobs (done/failed), newest first, within the window."""
-    rows = await metrics.get_recent_jobs(_since_iso(hours), limit)
+    rows = await jobs.get_recent_jobs(_since_iso(hours), limit)
     return [JobMetric(**asdict(r)) for r in rows]
 
 
@@ -81,10 +93,10 @@ async def get_jobs(
 async def get_jobs_history(
     hours: int = Query(168, ge=0, description="Window in hours (0 = all time)"),
     bucket: str = Query("hour", pattern="^(hour|day)$"),
-    metrics: IAlertMetricsRepository = Depends(get_metrics_repo),
+    jobs: IJobStore = Depends(get_job_store),
 ) -> List[JobHistoryPoint]:
     """Per-bucket done/failed counts and average duration for trend charts."""
-    rows = await metrics.get_jobs_history(_since_iso(hours), bucket)
+    rows = await jobs.get_jobs_history(_since_iso(hours), bucket)
     return [JobHistoryPoint(**asdict(r)) for r in rows]
 
 
@@ -95,7 +107,7 @@ async def get_jobs_history(
 )
 async def get_processor_history(
     hours: int = Query(168, ge=0, description="Window in hours (0 = all time)"),
-    metrics: IAlertMetricsRepository = Depends(get_metrics_repo),
+    metrics: IProcessorMetricsRepository = Depends(get_metrics_repo),
 ) -> List[ProcessorSamplePoint]:
     """Processor snapshots (queue depth, pending, counters) for trend charts."""
     rows = await metrics.get_processor_history(_since_iso(hours))

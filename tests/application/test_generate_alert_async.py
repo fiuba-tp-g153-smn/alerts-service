@@ -40,6 +40,11 @@ class _FakeProcessor:
     def get_status(self, job_id):
         return self._statuses.get(job_id)
 
+    async def get_status_durable(self, job_id):
+        # The endpoint uses the durable variant; the canned statuses stand in for
+        # the registry + durable store combined.
+        return self._statuses.get(job_id)
+
 
 @pytest.fixture
 def make_client():
