@@ -6,8 +6,8 @@ Create Date: 2026-06-18
 
 The per-job records moved to their own ``jobs.sqlite`` (the job-history store);
 ``metrics.sqlite`` now holds only ``processor_samples`` (sampled telemetry). Drop
-the now-unused ``alert_jobs`` table here so the metrics DB is metrics-only. The
-lifespan copies any legacy rows into the job store before this runs. Idempotent.
+the now-unused ``alert_jobs`` table here so the metrics DB is metrics-only.
+Idempotent.
 """
 
 from typing import Sequence, Union

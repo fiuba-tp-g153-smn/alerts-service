@@ -21,7 +21,6 @@ from container import (
 from controller import alerts, general, intersections, metrics
 from db.migrate import ensure_job_migrations, ensure_metrics_migrations
 from dependencies import logger, settings
-from migration_helpers import copy_legacy_job_history
 from scheduler import setup_scheduler
 from services.alert_job_processor import AlertJobProcessor
 from services.metrics_sampler import MetricsSampler
@@ -57,10 +56,8 @@ async def lifespan(_app: FastAPI):
     geo_repo = get_geo_repo()
     geo_repo.start_eviction_loop()
 
-    # Durable job-history store (always on): migrate, then one-time copy any legacy
-    # rows from the metrics DB *before* the metrics migration drops that table.
+    # Durable job-history store (always on): migrate the schema, then open it.
     await asyncio.to_thread(ensure_job_migrations, settings)
-    await asyncio.to_thread(copy_legacy_job_history, settings, logger)
     job_store = get_job_store()
     await job_store.connect()
 
