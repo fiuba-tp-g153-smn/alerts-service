@@ -39,6 +39,7 @@ import matplotlib.patches as mpatches
 import matplotlib.patheffects as pe
 import numpy as np
 from cartopy.mpl.geoaxes import GeoAxes
+from matplotlib.backends.backend_agg import FigureCanvasAgg
 from matplotlib.figure import Figure
 from matplotlib.patches import Polygon as MplPolygon
 from matplotlib.font_manager import FontProperties
@@ -87,6 +88,10 @@ _INSET_PNG: np.ndarray | None = None  # rasterised once per process
 # ---------------------------------------------------------------------------
 # bbox: CABA + Greater Buenos Aires (conurbano), not the whole province.
 AMBA_BBOX = (-59.20, -57.80, -35.25, -34.05)  # (lon_o, lon_e, lat_s, lat_n)
+
+# CABA is stored as 15 "Comuna N" departments, never as a single row. Both maps
+# collapse them into one point here (the Obelisco) labeled "CABA".
+CABA_POINT = (-58.3816, -34.6037)
 
 # Key = normalized district name (no accents, lowercase); value = seat.
 _AMBA_PAIRS = {
@@ -206,7 +211,10 @@ _NATIONAL_SEATS_PAIRS = {
     ("Mendoza", "San Rafael"): "San Rafael",
     ("Mendoza", "Malargüe"): "Malargüe",
     ("Mendoza", "San Carlos"): "San Carlos",
-    # --- Buenos Aires (outside the AMBA bbox) ---
+    # --- Buenos Aires (outside the AMBA bbox, plus La Plata) ---
+    # La Plata falls inside AMBA_BBOX, so on the zoom map it is resolved by
+    # AMBA_SEATS; this entry is what puts it on the country-wide map.
+    ("Buenos Aires", "La Plata"): "La Plata",
     ("Buenos Aires", "Pergamino"): "Pergamino",
     ("Buenos Aires", "Junín"): "Junín",
     ("Buenos Aires", "General Villegas"): "General Villegas",
@@ -272,6 +280,177 @@ def _department_label(
     if in_amba:
         return AMBA_SEATS.get(_norm(dept_name))  # None if not in the list
     return NATIONAL_SEATS.get((_norm(province), _norm(dept_name)), dept_name)
+
+
+def _national_label(dept_name: str, province: str) -> str | None:
+    """Text to display for a department on the country-wide map, or None to hide it.
+
+    Unlike `_department_label`, there is no fallback to the department name and no
+    AMBA special-casing: at country scale only the SMN-listed seats are shown, so
+    the map stays readable instead of drawing every department in the country.
+    """
+    return NATIONAL_SEATS.get((_norm(province), _norm(dept_name)))
+
+
+PLACE_FONTSIZE = 7.0
+
+# Candidate label positions, tried in order, as (dx, dy, ha, va) with the offset
+# in typographic points. Offsets are in points rather than degrees so a label sits
+# the same distance from its dot in Jujuy as in Chubut.
+_LABEL_OFFSETS = (
+    (4, 3, "left", "bottom"),
+    (4, -3, "left", "top"),
+    (-4, 3, "right", "bottom"),
+    (-4, -3, "right", "top"),
+    (4, 9, "left", "bottom"),
+    (-4, 9, "right", "bottom"),
+    (4, -9, "left", "top"),
+    (-4, -9, "right", "top"),
+)
+
+# Clear space kept around each label, in display pixels. Horizontal padding is the
+# large one: two names side by side with only a few pixels between them read as a
+# single word ("La CochaSantiago del Estero"), whereas stacked lines stay legible.
+# It also absorbs the white halo drawn by the path effect, which the font metrics
+# below do not account for.
+_LABEL_PAD_X_PX = 8.0
+_LABEL_PAD_Y_PX = 2.0
+
+# Half-size of the box reserved around each dot. Dots are obstacles too: a label
+# covering another city's dot hides the very thing it marks.
+_DOT_HALF_PX = 3.0
+
+
+def _dot_box(anchor_px):
+    """(x0, y0, x1, y1) display-pixel box reserved for a city dot."""
+    return (
+        anchor_px[0] - _DOT_HALF_PX,
+        anchor_px[1] - _DOT_HALF_PX,
+        anchor_px[0] + _DOT_HALF_PX,
+        anchor_px[1] + _DOT_HALF_PX,
+    )
+
+
+def _measure_label(ax: GeoAxes, renderer, label: str) -> tuple[float, float]:
+    """Display-pixel (width, height) of a label, measured with the real font metrics.
+
+    Estimating from character count under-measures bold text by 10-25%, which lets
+    visibly touching labels pass the overlap test.
+    """
+    probe = ax.text(0, 0, label, fontsize=PLACE_FONTSIZE, fontweight="bold")
+    box = probe.get_window_extent(renderer)
+    probe.remove()
+    return box.width, box.height
+
+
+def _label_box(anchor_px, offset, size, dpi):
+    """(x0, y0, x1, y1) display-pixel box of a label at one candidate offset."""
+    dx, dy, ha, va = offset
+    width, height = size
+    scale = dpi / 72.0
+
+    x = anchor_px[0] + dx * scale
+    y = anchor_px[1] + dy * scale
+    x0 = x if ha == "left" else x - width
+    y0 = y if va == "bottom" else y - height
+    return (
+        x0 - _LABEL_PAD_X_PX,
+        y0 - _LABEL_PAD_Y_PX,
+        x0 + width + _LABEL_PAD_X_PX,
+        y0 + height + _LABEL_PAD_Y_PX,
+    )
+
+
+def _overlaps(box, obstacles):
+    """True if `box` intersects any of `obstacles`."""
+    return any(
+        box[0] < other[2] and other[0] < box[2] and box[1] < other[3] and other[1] < box[3]
+        for other in obstacles
+    )
+
+
+def _choose_offset(anchor_px, size, dpi, obstacles):
+    """First candidate offset clear of `obstacles`, falling back to the default one.
+
+    Every label is drawn even when all candidates collide: the city list is
+    prescribed by the SMN, so dropping a name would silently lose required
+    information.
+    """
+    for offset in _LABEL_OFFSETS:
+        if not _overlaps(_label_box(anchor_px, offset, size, dpi), obstacles):
+            return offset
+    return _LABEL_OFFSETS[0]
+
+
+def _draw_dots(ax: GeoAxes, places) -> None:
+    """Draw the dot marking each reference city."""
+    for lon, lat, _ in places:
+        ax.plot(
+            lon,
+            lat,
+            ".",
+            color="#555555",
+            markersize=3.5,
+            transform=ccrs.PlateCarree(),
+            zorder=11,
+        )
+
+
+def _annotate_place(ax: GeoAxes, xy, label: str, offset) -> None:
+    """Draw one city label at `offset` from its dot, haloed so it reads over the map."""
+    dx, dy, ha, va = offset
+    ax.annotate(
+        label,
+        xy=xy,
+        xycoords="data",
+        xytext=(dx, dy),
+        textcoords="offset points",
+        ha=ha,
+        va=va,
+        fontsize=PLACE_FONTSIZE,
+        color="#111111",
+        fontweight="bold",
+        zorder=12,
+        annotation_clip=True,
+        path_effects=[pe.withStroke(linewidth=2, foreground="white")],
+    )
+
+
+def _get_renderer(fig):
+    """Renderer for measuring text.
+
+    A bare Figure has no Agg canvas until savefig creates one, but measuring text
+    needs a renderer now — attach the same canvas savefig would use later.
+    """
+    if not hasattr(fig.canvas, "get_renderer"):
+        FigureCanvasAgg(fig)
+    return fig.canvas.get_renderer()
+
+
+def _draw_places(ax: GeoAxes, places, dpi: int) -> None:
+    """Draw reference cities: a dot each, then labels placed to avoid overlapping."""
+    _draw_dots(ax, places)
+    renderer = _get_renderer(ax.get_figure())
+
+    # Longest names first: they are the hardest to fit, so they get first pick of
+    # the free space. Name breaks ties to keep the output deterministic.
+    ordered = sorted(places, key=lambda p: (-len(p[2]), p[2]))
+    projected = [
+        ax.projection.transform_point(lon, lat, ccrs.PlateCarree())
+        for lon, lat, _ in ordered
+    ]
+    anchors = [ax.transData.transform(xy) for xy in projected]
+    dot_boxes = [_dot_box(anchor) for anchor in anchors]
+    placed: list[tuple[float, float, float, float]] = []
+
+    for i, (_, _, label) in enumerate(ordered):
+        size = _measure_label(ax, renderer, label)
+        # Every dot except this label's own — that one sits inside the label box
+        # by construction and would rule out every candidate offset.
+        obstacles = placed + dot_boxes[:i] + dot_boxes[i + 1 :]
+        chosen = _choose_offset(anchors[i], size, dpi, obstacles)
+        placed.append(_label_box(anchors[i], chosen, size, dpi))
+        _annotate_place(ax, projected[i], label, chosen)
 
 
 # ---------------------------------------------------------------------------
@@ -978,7 +1157,9 @@ def generate_area_gif(  # pylint: disable=too-many-locals
     return out
 
 
-def generate_general_gif(text, coords, timestamp, output_dir, dept_geoms, prov_geoms):
+def generate_general_gif(  # pylint: disable=too-many-locals
+    text, coords, timestamp, output_dir, dept_geoms, prov_geoms, all_departments
+):
     """Generate country-wide GIF showing full Argentina with polygon."""
     lons = [c[1] for c in coords]
     lats = [c[0] for c in coords]
@@ -1041,6 +1222,34 @@ def generate_general_gif(text, coords, timestamp, output_dir, dept_geoms, prov_g
             zorder=9,
         )
     )
+
+    # Reference cities (SMN-provided seat list) — only those, no per-department
+    # fallback, so the country-wide map stays readable.
+    lon_min, lon_max, lat_min, lat_max = extent
+    places = []
+    caba_visible = False
+    for department in all_departments or []:
+        lon, lat = float(department["longitud"]), float(department["latitud"])
+        if not (lon_min <= lon <= lon_max and lat_min <= lat <= lat_max):
+            continue
+
+        dept_name = department["nom_departamento"]
+
+        # CABA communes: skip individual dots, consolidate into one point below.
+        if dept_name.lower().startswith("comuna ") and dept_name[7:].strip().isdigit():
+            caba_visible = True
+            continue
+
+        label = _national_label(dept_name, department.get("provincia", ""))
+        if label is None:
+            continue
+
+        places.append((lon, lat, label.replace("General ", "Gral. ")))
+
+    if caba_visible:
+        places.append((CABA_POINT[0], CABA_POINT[1], "CABA"))
+
+    _draw_places(ax_map, places, dpi=80)
 
     _add_watermark(fig_final)
 
@@ -1131,6 +1340,7 @@ async def main():
                 output_dir,
                 dept_geoms_all,
                 prov_geoms,
+                all_departments,
             ),
         )
 
