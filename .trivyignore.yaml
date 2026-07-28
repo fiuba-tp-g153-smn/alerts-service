@@ -1,17 +1,28 @@
 # Trivy vulnerability suppressions.
 #
-# perl-base CVEs with no upstream Debian fix as of 2026-05-29 (Fixed Version is
+# perl-base CVEs with no upstream Debian fix as of 2026-07-28 (Fixed Version is
 # empty in the scan). Not exploitable here: this image runs a Python/FastAPI
-# service and never invokes the Perl interpreter (no Archive::Tar extraction,
-# no Perl regex compilation). Re-evaluate after `expires-at` — by then Debian
-# should ship a patched perl-base and the rebuild will clear these on its own.
+# service and never invokes the Perl interpreter — perl-base is not installed by
+# the Dockerfile, it comes in transitively with the Debian base. Re-evaluate
+# after `expires-at` — by then Debian should ship a patched perl-base and the
+# rebuild will clear these on its own.
 vulnerabilities:
-  - id: CVE-2026-42496
-    expires-at: 2026-07-01
-    statement: "perl-base not reachable; service never runs Archive::Tar. No Debian fix available yet."
-  - id: CVE-2026-8376
-    expires-at: 2026-07-01
-    statement: "perl-base not reachable; service never compiles Perl regex. No Debian fix available yet."
+  - id: CVE-2026-13221
+    expires-at: 2026-09-01
+    statement: "perl-base not reachable; service never runs Perl regex. No Debian fix available yet."
+  - id: CVE-2026-57433
+    expires-at: 2026-09-01
+    statement: "perl-base not reachable; service never loads Storable. No Debian fix available yet."
+
+  # libxml2 denial of service through crafted XML. No request path parses XML:
+  # the IGN layers are fetched with outputFormat=application/json (GeoJSON, not
+  # GML), and the only XML the worker processes is cuarteron.svg, a static asset
+  # baked into the image. Revisit this one if the service ever gains KML/GML
+  # support or a WFS source that returns XML — the reasoning depends on that.
+  # No trixie fix as of 2026-07-28.
+  - id: CVE-2026-6653
+    expires-at: 2026-09-01
+    statement: "libxml2 DoS; no XML parsing on any request path, only a bundled static SVG. No trixie fix yet."
 
   # MariaDB server CVEs flagged against libmariadb3/mariadb-common (source pkg
   # "mariadb"). These packages are a transitive dependency of libgdal36, NOT of
@@ -23,11 +34,11 @@ vulnerabilities:
   # Re-evaluate after `expires-at` — a rebuild will clear these once Debian
   # backports the fix to trixie.
   - id: CVE-2026-44170
-    expires-at: 2026-08-01
+    expires-at: 2026-09-01
     statement: "MariaDB server CONNECT/REST RCE; no server in image, libmariadb3 unused. No trixie fix yet."
   - id: CVE-2026-49261
-    expires-at: 2026-08-01
+    expires-at: 2026-09-01
     statement: "MariaDB server Galera wsrep RCE; no server in image, libmariadb3 unused. No trixie fix yet."
   - id: CVE-2026-44172
-    expires-at: 2026-08-01
+    expires-at: 2026-09-01
     statement: "MariaDB connector big5 escape bypass; libmariadb3 present only via GDAL and never invoked. No trixie fix yet."
