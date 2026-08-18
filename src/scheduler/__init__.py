@@ -7,15 +7,14 @@ import json
 import os
 import pickle
 import shutil
+import subprocess
+import sys
 from logging import Logger
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
-import cartopy.crs as ccrs
-import geopandas as gpd
-from shapely.geometry import shape as shapely_shape
 
-from adapters.geo_layer_processor import GeoLayerProcessor
+from adapters.geo_layer_processor import GeoLayerProcessor, _WORKER_ENV
 from adapters.s3_storage import S3ObjectStorage
 from ports.geo_layer_processor import IGeoLayerProcessor
 from services.geo_layer_sync_service import GeoLayerSyncService
@@ -94,8 +93,45 @@ async def _ensure_alert_layers(
         logger.info(f"{layer['simplified_stem']}: ready.")
 
 
+_CACHE_WORKER_PATH = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "..", "geo_cache_worker.py")
+)
+
+
+async def _run_geo_cache_worker(tasks: list[dict], logger: Logger) -> None:
+    """Spawn geo_cache_worker and stream the tasks via stdin.
+
+    The heavy GeoPandas/Shapely/Cartopy work runs in the child so its memory is
+    returned to the OS on exit and never loads into the main process. Uses
+    create_subprocess_exec so CancelledError terminates the child immediately.
+    """
+    proc = await asyncio.create_subprocess_exec(
+        sys.executable,
+        _CACHE_WORKER_PATH,
+        stdin=asyncio.subprocess.PIPE,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+        env=_WORKER_ENV,
+    )
+    try:
+        _, stderr = await proc.communicate(json.dumps(tasks).encode())
+    except asyncio.CancelledError:
+        proc.terminate()
+        await proc.wait()
+        raise
+    if proc.returncode is not None and proc.returncode != 0:
+        raise subprocess.CalledProcessError(proc.returncode, sys.executable, stderr)
+    for line in stderr.decode(errors="replace").splitlines():
+        if line.strip():
+            logger.info("geo_cache_worker: %s", line)
+
+
 async def _build_alert_cache(settings, logger: Logger) -> None:
-    """Build dept/prov spatial index pickles from simplified GeoJSON files."""
+    """Build dept/prov spatial index pickles from simplified GeoJSON files.
+
+    The GeoJSON parsing runs in geo_cache_worker (subprocess); only the light
+    latest-file glob happens here in the main process.
+    """
     data_dir = settings.data_dir
     cache_dir = settings.alert_cache_dir
     os.makedirs(cache_dir, exist_ok=True)
@@ -122,44 +158,32 @@ async def _build_alert_cache(settings, logger: Logger) -> None:
             matches = sorted(glob.glob(os.path.join(data_dir, f"{stem}_*.geojson")))
         return matches[-1] if matches else None
 
-    def _build_index(path: str) -> list:
-        with open(path, encoding="utf-8") as f:
-            gj = json.load(f)
-        index = []
-        for feat in gj["features"]:
-            g = shapely_shape(feat["geometry"])
-            index.append((g.bounds, g))
-        return index
-
-    def _build_and_dump(stem: str, out_name: str) -> tuple[int, float] | None:
-        path = _latest_geojson(stem)
-        if not path:
-            return None
-        logger.info(f"Building {out_name} from {os.path.basename(path)} ...")
-        index = _build_index(path)
-        out = os.path.join(cache_dir, out_name)
-        with open(out, "wb") as f:
-            pickle.dump(index, f, protocol=pickle.HIGHEST_PROTOCOL)
-        size_mb = os.path.getsize(out) / 1024 / 1024
-        return len(index), size_mb
-
+    tasks: list[dict] = []
+    outputs: list[str] = []
     for stem, out_name in [
         ("departamentos_simple", "dept_index.pkl"),
         ("provincias_simple", "prov_index.pkl"),
     ]:
-        result = await asyncio.to_thread(_build_and_dump, stem, out_name)
-        if result is None:
+        path = _latest_geojson(stem)
+        if not path:
             logger.warning(f"No {stem} geojson found — skipping {out_name}")
             continue
-        count, size_mb = result
-        logger.info(f"  → {count} geometries → {out_name} ({size_mb:.1f} MB)")
+        out = os.path.join(cache_dir, out_name)
+        tasks.append({"op": "build_index", "in_path": path, "out_path": out})
+        outputs.append(out)
+
+    if not tasks:
+        return
+
+    await _run_geo_cache_worker(tasks, logger)
+    for out in outputs:
+        if os.path.exists(out):
+            size_mb = os.path.getsize(out) / 1024 / 1024
+            logger.info(f"  → {os.path.basename(out)} ({size_mb:.1f} MB)")
 
 
-_DATA_DIR = "/app/data_alerts"
-_BORDERS_SHP = os.path.join(_DATA_DIR, "limites.shp")
-_PROVINCES_SHP = os.path.join(_DATA_DIR, "Provincias.shp")
-_REFERENCES_SHP = os.path.join(_DATA_DIR, "referencias.shp")
-_PLACE_LABELS_SHP = os.path.join(_DATA_DIR, "toponimos.shp")
+_IGN_SHP_DIR = "/app/data_alerts"
+_BORDERS_SHP = os.path.join(_IGN_SHP_DIR, "limites.shp")
 
 # ign_layers.pkl format version. Geometries (except 'place_labels') are stored
 # pre-projected to ccrs.Mercator() so alert_generation_worker can render them via
@@ -168,230 +192,9 @@ _PLACE_LABELS_SHP = os.path.join(_DATA_DIR, "toponimos.shp")
 # stored geometry format, projection, OR the dict key names change, to force a
 # rebuild. v3: dict keys standardized to English (group_*/countries/provinces/
 # place_labels) — a v2 cache has the old Spanish keys and must be regenerated.
+# The build itself lives in geo_cache_worker._build_ign; this version is passed to
+# it via the task payload, so keep the two in sync when changing the stored format.
 _IGN_CACHE_FORMAT_VERSION = 3
-
-
-def _read_place_labels_manual(shp_path: str, logger: Logger) -> list:
-    """Read toponimos.shp without geopandas/pyogrio to avoid the latin-1 encoding error.
-
-    Parses the DBF with latin-1 via stdlib and extracts PointZ coordinates from the SHP.
-    Filters only the types relevant for the map: 'arg', 'continen' (with Arg.),
-    and 'isla'.
-    """
-    import struct
-
-    dbf_path = shp_path.replace(".shp", ".dbf")
-
-    # --- Read DBF attributes (latin-1) ---------------------------------------
-    attrs: list = []
-    try:
-        with open(dbf_path, "rb") as f:
-            hdr = f.read(32)
-            num_recs = struct.unpack("<I", hdr[4:8])[0]
-            hdr_size = struct.unpack("<H", hdr[8:10])[0]
-            rec_size = struct.unpack("<H", hdr[10:12])[0]
-
-            fields: list = []
-            while True:
-                fd = f.read(32)
-                if not fd or fd[0] == 0x0D:
-                    break
-                fname = fd[:11].rstrip(b"\x00").decode("ascii", errors="replace")
-                ftype = chr(fd[11])
-                flen = fd[16]
-                fields.append((fname, ftype, flen))
-
-            f.seek(hdr_size)
-            for _ in range(num_recs):
-                flag = f.read(1)
-                rec: dict = {}
-                for fname, ftype, flen in fields:
-                    raw = f.read(flen)
-                    if ftype == "C":
-                        rec[fname] = raw.rstrip(b"\x00 ").decode(
-                            "latin-1", errors="replace"
-                        )
-                    elif ftype in ("N", "F"):
-                        try:
-                            rec[fname] = float(raw.strip()) if raw.strip() else None
-                        except ValueError:
-                            rec[fname] = None
-                    else:
-                        rec[fname] = raw.rstrip(b"\x00").decode(
-                            "latin-1", errors="replace"
-                        )
-                if flag != b"*":  # not a deleted record
-                    attrs.append(rec)
-    except Exception as exc:
-        logger.warning("Could not read %s: %s", dbf_path, exc)
-        return []
-
-    # --- Read SHP coordinates (PointZ = type 13, Point = type 1) -------------
-    coords: list = []
-    try:
-        with open(shp_path, "rb") as f:
-            shp_hdr = f.read(100)
-            file_len = struct.unpack(">I", shp_hdr[24:28])[0] * 2
-            while f.tell() < file_len:
-                rec_hdr = f.read(8)
-                if len(rec_hdr) < 8:
-                    break
-                content_len = struct.unpack(">I", rec_hdr[4:8])[0] * 2
-                content = f.read(content_len)
-                if len(content) < 4:
-                    coords.append((None, None))
-                    continue
-                stype = struct.unpack("<i", content[:4])[0]
-                if stype in (1, 13) and len(content) >= 20:  # Point or PointZ
-                    x, y = struct.unpack("<dd", content[4:20])
-                    coords.append((round(x, 4), round(y, 4)))
-                else:
-                    coords.append((None, None))
-    except Exception as exc:
-        logger.warning("Could not read %s: %s", shp_path, exc)
-        return []
-
-    # --- Combine and filter ---------------------------------------------------
-    TYPES = {"arg", "continen", "isla"}
-    EXCLUDE = {
-        "ISLAS AURORA (Arg.)",
-        "ISLAS GEORGIAS DEL SUR (Arg.)",
-        "ISLAS SANDWICH DEL SUR (Arg.)",
-    }
-    result: list = []
-    for (lon, lat), attr in zip(coords, attrs):
-        if lon is None:
-            continue
-        kind = str(attr.get("tipo", "") or "")
-        name = str(attr.get("nombre", "") or "")
-        if kind not in TYPES:
-            continue
-        if kind == "continen" and "(Arg.)" not in name:
-            continue
-        if name in EXCLUDE:
-            continue
-        # Malvinas: show only "(Arg.)" without the full name
-        if name == "ISLAS MALVINAS (Arg.)":
-            name = "(Arg.)"
-        result.append({"lon": lon, "lat": lat, "nombre": name, "tipo": kind})
-
-    logger.info("Place labels loaded: %d (Arg.) labels + islands", len(result))
-    return result
-
-
-def _build_ign_cache_sync(
-    cache_dir: str, logger: Logger, simplify_tolerance: float
-) -> None:
-    """Read IGN shapefiles, simplify geometries, and persist to ign_layers.pkl.
-
-    Groups:
-      group_a – international + Rio de la Plata bed + arg-uru maritime lateral (solid thick)
-      group_b – interprovincial + coastline                                    (solid thin)
-      group_c – outer Rio de la Plata                                          (dashed)
-      group_d – Antarctic sector (by NAM)                                      (dot-dash)
-      provinces – province polygons                                            (fill white)
-      countries – neighbouring countries (tipo='país')                         (fill grey)
-      place_labels – point labels: (Arg.) markers + island/country names       (text)
-    """
-    if not os.path.exists(_BORDERS_SHP):
-        logger.warning(
-            "IGN shapefiles not found at %s — skipping ign_layers.pkl", _DATA_DIR
-        )
-        return
-
-    out_path = os.path.join(cache_dir, "ign_layers.pkl")
-    logger.info("Building ign_layers.pkl from IGN shapefiles ...")
-
-    tol = simplify_tolerance
-    pc = ccrs.PlateCarree()
-    merc = ccrs.Mercator()
-
-    def _simplify_wkb(geoms) -> list:
-        """Simplify, project to Mercator, and serialise geometries to WKB hex strings.
-
-        Pre-projecting here (one-time, at cache-build) lets the worker render via
-        add_geometries(crs=ccrs.Mercator()), avoiding per-request reprojection.
-        """
-        result = []
-        for g in geoms:
-            if g is None or g.is_empty:
-                continue
-            sg = g.simplify(tol, preserve_topology=True)
-            if sg.is_empty:
-                continue
-            pg = merc.project_geometry(sg, pc)
-            if not pg.is_empty:
-                result.append(pg.wkb_hex)
-        return result
-
-    # --- limites.shp ---------------------------------------------------------
-    lim = gpd.read_file(_BORDERS_SHP)
-    obj_col = "Objeto" if "Objeto" in lim.columns else "objeto"
-    nam_col = "NAM" if "NAM" in lim.columns else "nam"
-
-    GROUP_A = {
-        "Límite internacional",
-        "Límite del lecho y subsuelo del Río de la Plata",
-        "Límite lateral marítimo argentino-uruguayo",
-    }
-    GROUP_B = {"Límite Interprovincial", "Línea de costa"}
-    GROUP_C = {"Límite exterior del Río de la Plata"}
-    ANTARCTIC_SECTOR = "Límite del Sector Antártico Argentino"
-
-    ga, gb, gc, gd = [], [], [], []
-    for _, row in lim.iterrows():
-        geom = row.geometry
-        if geom is None or geom.is_empty:
-            continue
-        obj = row.get(obj_col, "") or ""
-        nam = row.get(nam_col, "") or ""
-        if ANTARCTIC_SECTOR in nam:
-            gd.append(geom)
-        elif obj in GROUP_A:
-            ga.append(geom)
-        elif obj in GROUP_B:
-            gb.append(geom)
-        elif obj in GROUP_C:
-            gc.append(geom)
-
-    # --- Provincias.shp ------------------------------------------------------
-    provinces_wkb: list = []
-    if os.path.exists(_PROVINCES_SHP):
-        prov_df = gpd.read_file(_PROVINCES_SHP)
-        provinces_wkb = _simplify_wkb(list(prov_df.geometry))
-
-    # --- referencias.shp (neighboring countries) ------------------------------
-    countries_wkb: list = []
-    if os.path.exists(_REFERENCES_SHP):
-        ref_df = gpd.read_file(_REFERENCES_SHP)
-        type_col = "tipo" if "tipo" in ref_df.columns else "TIPO"
-        countries_df = ref_df[ref_df[type_col] == "país"]
-        countries_wkb = _simplify_wkb(list(countries_df.geometry))
-
-    # --- toponimos.shp (text labels: (Arg.), island names, etc.) ---------------
-    # pyogrio (geopandas backend) does NOT support the encoding parameter for
-    # shapefiles, so we read the file manually with stdlib.
-    place_labels: list = []
-    if os.path.exists(_PLACE_LABELS_SHP):
-        place_labels = _read_place_labels_manual(_PLACE_LABELS_SHP, logger)
-
-    layers = {
-        "_format_version": _IGN_CACHE_FORMAT_VERSION,
-        "group_a": _simplify_wkb(ga),
-        "group_b": _simplify_wkb(gb),
-        "group_c": _simplify_wkb(gc),
-        "group_d": _simplify_wkb(gd),
-        "provinces": provinces_wkb,
-        "countries": countries_wkb,
-        "place_labels": place_labels,
-    }
-
-    with open(out_path, "wb") as f:
-        pickle.dump(layers, f, protocol=pickle.HIGHEST_PROTOCOL)
-
-    size_mb = os.path.getsize(out_path) / 1024 / 1024
-    totals = {k: len(v) for k, v in layers.items() if isinstance(v, (list, dict))}
-    logger.info("ign_layers.pkl ready: %s geometries, %.1f MB", totals, size_mb)
 
 
 def _ign_cache_up_to_date(out_path: str) -> bool:
@@ -407,7 +210,7 @@ def _ign_cache_up_to_date(out_path: str) -> bool:
 
 
 async def _build_ign_cache(settings, logger: Logger) -> None:
-    """Async wrapper: run IGN shapefile pre-processing in a thread pool."""
+    """Build ign_layers.pkl from IGN shapefiles via the geo_cache_worker subprocess."""
     cache_dir = settings.alert_cache_dir
     os.makedirs(cache_dir, exist_ok=True)
     out_path = os.path.join(cache_dir, "ign_layers.pkl")
@@ -416,8 +219,22 @@ async def _build_ign_cache(settings, logger: Logger) -> None:
             "ign_layers.pkl already exists and is up to date — skipping rebuild."
         )
         return
-    await asyncio.to_thread(
-        _build_ign_cache_sync, cache_dir, logger, settings.ign_simplify_tolerance
+    if not os.path.exists(_BORDERS_SHP):
+        logger.warning(
+            "IGN shapefiles not found at %s — skipping ign_layers.pkl", _IGN_SHP_DIR
+        )
+        return
+    await _run_geo_cache_worker(
+        [
+            {
+                "op": "build_ign",
+                "shp_dir": _IGN_SHP_DIR,
+                "out_path": out_path,
+                "tolerance": settings.ign_simplify_tolerance,
+                "format_version": _IGN_CACHE_FORMAT_VERSION,
+            }
+        ],
+        logger,
     )
 
 
@@ -482,9 +299,7 @@ async def _build_inset_cache(settings, logger: Logger) -> None:
     os.makedirs(cache_dir, exist_ok=True)
     out_path = os.path.join(cache_dir, _INSET_CACHE_NAME)
     if _inset_up_to_date(out_path, _INSET_SVG_PATH):
-        logger.info(
-            "inset.png already exists and is up to date — skipping rebuild."
-        )
+        logger.info("inset.png already exists and is up to date — skipping rebuild.")
         return
     await asyncio.to_thread(_build_inset_cache_sync, cache_dir, logger)
 
