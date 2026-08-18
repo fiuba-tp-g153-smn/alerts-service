@@ -76,7 +76,6 @@ MAP_TOP = PHENOM_Y  # map fills [0, 22/27]
 
 # Header palette
 HEADER_BG = "#252c4f"
-HEADER_ALPHA = 0.9  # 10% transparency
 
 _IGN: dict | None = None  # loaded lazily on first call inside main()
 _INSET_PNG: np.ndarray | None = None  # rasterised once per process
@@ -723,7 +722,6 @@ def _alert_panel(fig, text, mode="area"):
             1,
             1,
             facecolor=HEADER_BG,
-            # alpha=HEADER_ALPHA,
             edgecolor="none",
             transform=ax_hdr.transAxes,
             clip_on=False,
