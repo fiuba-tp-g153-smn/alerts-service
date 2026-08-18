@@ -81,3 +81,23 @@ def test_get_recent_with_limit_1_returns_only_most_recent(tmp_path):
 
     assert len(results) == 1
     assert results[0]["status"] == "failed"
+
+
+def test_connection_uses_wal_journal_mode(tmp_path):
+    # WAL lets the cron writer and API reader share the connection without
+    # `database is locked` — see BUG-01. Guard against a regression.
+    repo = SqliteHistoryRepository(str(tmp_path / "test.db"))
+
+    mode = repo._conn.execute("PRAGMA journal_mode;").fetchone()[0]
+
+    assert mode.lower() == "wal"
+
+
+def test_run_at_is_timezone_aware_utc(tmp_path):
+    repo = SqliteHistoryRepository(str(tmp_path / "test.db"))
+
+    repo.record_run(status="success", files=None, duration_sec=1.0, error=None)
+
+    run_at = datetime.fromisoformat(repo.get_recent(limit=1)[0]["run_at"])
+    assert run_at.tzinfo is not None
+    assert run_at.utcoffset().total_seconds() == 0

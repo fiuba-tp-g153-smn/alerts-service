@@ -17,7 +17,6 @@ from shapely.geometry import shape as shapely_shape
 
 from adapters.geo_layer_processor import GeoLayerProcessor
 from adapters.s3_storage import S3ObjectStorage
-from adapters.sqlite_history import SqliteHistoryRepository
 from ports.geo_layer_processor import IGeoLayerProcessor
 from services.geo_layer_sync_service import GeoLayerSyncService
 from services.geo_layer_sync_service import _extract_date
@@ -507,8 +506,12 @@ async def setup_scheduler(settings, logger: Logger) -> AsyncIOScheduler:
     await _build_ign_cache(settings, logger)
     await _build_inset_cache(settings, logger)
 
-    db_path = os.path.join(data_dir, "history.db")
-    history = SqliteHistoryRepository(db_path)
+    # Reuse the DI singleton (closed in the lifespan shutdown) instead of opening
+    # a second connection to the same history.db — two unsynchronised connections
+    # risk `database is locked`, and the scheduler-owned one would leak on shutdown.
+    from container import get_history_repo
+
+    history = get_history_repo()
     refresh_service = LayerRefreshService(settings, storage, processor, logger)
 
     scheduler = AsyncIOScheduler(timezone="UTC")
