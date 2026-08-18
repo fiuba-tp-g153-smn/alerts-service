@@ -162,10 +162,6 @@ _PROVINCES_SHP = os.path.join(_DATA_DIR, "Provincias.shp")
 _REFERENCES_SHP = os.path.join(_DATA_DIR, "referencias.shp")
 _PLACE_LABELS_SHP = os.path.join(_DATA_DIR, "toponimos.shp")
 
-# Simplification tolerance for IGN geometries in the cache.
-# 0.005° ≈ 500 m: invisible at national/regional scale, reduces cache size ~95 %.
-_IGN_SIMPLIFY_TOLERANCE = 0.005
-
 # ign_layers.pkl format version. Geometries (except 'place_labels') are stored
 # pre-projected to ccrs.Mercator() so alert_generation_worker can render them via
 # add_geometries(crs=ccrs.Mercator()), skipping cartopy's expensive per-request
@@ -284,7 +280,9 @@ def _read_place_labels_manual(shp_path: str, logger: Logger) -> list:
     return result
 
 
-def _build_ign_cache_sync(cache_dir: str, logger: Logger) -> None:
+def _build_ign_cache_sync(
+    cache_dir: str, logger: Logger, simplify_tolerance: float
+) -> None:
     """Read IGN shapefiles, simplify geometries, and persist to ign_layers.pkl.
 
     Groups:
@@ -305,7 +303,7 @@ def _build_ign_cache_sync(cache_dir: str, logger: Logger) -> None:
     out_path = os.path.join(cache_dir, "ign_layers.pkl")
     logger.info("Building ign_layers.pkl from IGN shapefiles ...")
 
-    tol = _IGN_SIMPLIFY_TOLERANCE
+    tol = simplify_tolerance
     pc = ccrs.PlateCarree()
     merc = ccrs.Mercator()
 
@@ -419,7 +417,9 @@ async def _build_ign_cache(settings, logger: Logger) -> None:
             "ign_layers.pkl already exists and is up to date — skipping rebuild."
         )
         return
-    await asyncio.to_thread(_build_ign_cache_sync, cache_dir, logger)
+    await asyncio.to_thread(
+        _build_ign_cache_sync, cache_dir, logger, settings.ign_simplify_tolerance
+    )
 
 
 # Pre-rasterised inset PNG — name must match

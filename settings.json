@@ -29,5 +29,6 @@
     "5": 0.01,
     "7": 0.005
   },
-  "departments_simplify_tolerance": 0.005
+  "departments_simplify_tolerance": 0.005,
+  "ign_simplify_tolerance": 0.005
 }

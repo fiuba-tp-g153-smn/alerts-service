@@ -26,6 +26,9 @@ class Settings:  # pylint: disable=too-many-instance-attributes,too-few-public-m
     settings_file: str = "settings.json"
     detail_level_tolerances: dict = {}
     departments_simplify_tolerance: float = 0.005
+    # Simplify tolerance for IGN base-map geometries (~0.005° ≈ 500 m); sibling
+    # of departments_simplify_tolerance. Trades render quality vs cache size.
+    ign_simplify_tolerance: float = 0.005
 
     # Geospatial
     data_dir: str = "/app/data"
@@ -123,6 +126,7 @@ class Settings:  # pylint: disable=too-many-instance-attributes,too-few-public-m
         self.departments_simplify_tolerance = float(
             data.pop("departments_simplify_tolerance", 0.005)
         )
+        self.ign_simplify_tolerance = float(data.pop("ign_simplify_tolerance", 0.005))
 
         # Everything else nests under namespace objects (layer, alert, metrics);
         # flatten to underscore-joined keys so nesting is purely cosmetic and the
@@ -246,6 +250,7 @@ class Settings:  # pylint: disable=too-many-instance-attributes,too-few-public-m
         logger.info(
             "DEPARTMENTS_SIMPLIFY_TOLERANCE: %s", self.departments_simplify_tolerance
         )
+        logger.info("IGN_SIMPLIFY_TOLERANCE: %s", self.ign_simplify_tolerance)
         logger.info("ALERTS_DETAIL_LEVEL: %s", self.alerts_detail_level)
         logger.info("ALERTS_JOB_WORKERS: %s", self.alerts_job_workers)
         logger.info("ALERTS_JOB_QUEUE_MAXSIZE: %s", self.alerts_job_queue_maxsize)
