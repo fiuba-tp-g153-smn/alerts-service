@@ -74,10 +74,10 @@ async def lifespan(_app: FastAPI):
     processor = AlertJobProcessor(
         get_singleton_alert_service(),
         logger,
-        maxsize=settings.alert_job_queue_maxsize,
-        workers=settings.alert_job_workers,
-        job_timeout=settings.alert_job_timeout_seconds,
-        supervisor_interval=settings.alert_supervisor_interval_seconds,
+        maxsize=settings.alerts_job_queue_maxsize,
+        workers=settings.alerts_job_workers,
+        job_timeout=settings.alerts_job_timeout_seconds,
+        supervisor_interval=settings.alerts_supervisor_interval_seconds,
         job_store=job_store,
     )
     processor.start()
@@ -105,7 +105,7 @@ async def lifespan(_app: FastAPI):
     if sampler is not None:
         await sampler.stop()
 
-    await processor.shutdown(drain=True, timeout=settings.alert_job_shutdown_seconds)
+    await processor.shutdown(drain=True, timeout=settings.alerts_job_shutdown_seconds)
 
     await geo_repo.stop_eviction_loop()
 

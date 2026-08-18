@@ -63,8 +63,8 @@ async def _ensure_alert_layers(
 ) -> None:
     """Ensure alert-specific layers are present locally (simplified GeoJSON only)."""
     data_dir = settings.data_dir
-    detail_level = settings.alert_detail_level
-    tolerance = settings.detail_levels.get(detail_level, 0.005)
+    detail_level = settings.alerts_detail_level
+    tolerance = settings.detail_level_tolerances.get(detail_level, 0.005)
 
     def _local_date(stem: str) -> str | None:
         matches = sorted(
@@ -103,21 +103,21 @@ async def _build_alert_cache(settings, logger: Logger) -> None:
 
     logger.info(
         "Building alert cache using detail level %d",
-        settings.alert_detail_level,
+        settings.alerts_detail_level,
     )
 
     def _latest_geojson(stem: str) -> str | None:
         matches = sorted(
             glob.glob(
                 os.path.join(
-                    data_dir, f"{stem}_L{settings.alert_detail_level}_*.geojson"
+                    data_dir, f"{stem}_L{settings.alerts_detail_level}_*.geojson"
                 )
             )
         )
         if not matches:
             logger.warning(
                 "No L%d file found for %s — falling back to latest available",
-                settings.alert_detail_level,
+                settings.alerts_detail_level,
                 stem,
             )
             matches = sorted(glob.glob(os.path.join(data_dir, f"{stem}_*.geojson")))

@@ -36,13 +36,13 @@ class LayerRefreshService:  # pylint: disable=too-few-public-methods
 
     def _country_fnames(self) -> list[str]:
         fnames = []
-        for level, tolerance in self.settings.detail_levels.items():
+        for level, tolerance in self.settings.detail_level_tolerances.items():
             tol = IGeoLayerProcessor.tolerance_str(tolerance)
             fnames.append(f"pais_simple_L{level}_T{tol}.geojson")
         return fnames
 
     def _departments_fnames(self) -> list[str]:
-        tol = IGeoLayerProcessor.tolerance_str(self.settings.departments_detail_level)
+        tol = IGeoLayerProcessor.tolerance_str(self.settings.departments_simplify_tolerance)
         return [f"departamentos_simple_T{tol}.geojson"]
 
     async def _upload_files(self, data_dir: str) -> list[str]:
@@ -75,7 +75,7 @@ class LayerRefreshService:  # pylint: disable=too-few-public-methods
 
     async def _simplify_country(self, country_tmp: str) -> None:
         data_dir = self.settings.data_dir
-        for level, tolerance in self.settings.detail_levels.items():
+        for level, tolerance in self.settings.detail_level_tolerances.items():
             out = os.path.join(
                 data_dir,
                 IGeoLayerProcessor.tolerance_versioned_key(
@@ -85,7 +85,7 @@ class LayerRefreshService:  # pylint: disable=too-few-public-methods
             await self.processor.simplify(country_tmp, out, tolerance)
 
     async def _simplify_departments(self, deptos_tmp: str) -> None:
-        tolerance = self.settings.departments_detail_level
+        tolerance = self.settings.departments_simplify_tolerance
         out = os.path.join(
             self.settings.data_dir,
             IGeoLayerProcessor.tolerance_versioned_key("departamentos_simple.geojson", tolerance),

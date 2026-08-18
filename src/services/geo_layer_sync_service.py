@@ -60,8 +60,8 @@ class GeoLayerSyncService:  # pylint: disable=too-few-public-methods
     def _levels_for(self, layer: dict) -> dict[int | None, float]:
         """Return the {level: tolerance} map to reconcile/generate for the given layer."""
         if layer["simplified_stem"] == "departamentos_simple":
-            return {None: self.settings.departments_detail_level}
-        return self.settings.detail_levels
+            return {None: self.settings.departments_simplify_tolerance}
+        return self.settings.detail_level_tolerances
 
     async def ensure_all(self) -> list[tuple[dict, list[tuple[int | None, float]]]]:
         """Reconcile all layers. Returns list of (layer_info, missing_levels)."""

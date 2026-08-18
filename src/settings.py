@@ -2,7 +2,7 @@
 
 import json
 import os
-from logging import Logger
+from logging import Logger, getLogger
 
 from dotenv import load_dotenv
 
@@ -24,8 +24,8 @@ class Settings:  # pylint: disable=too-many-instance-attributes,too-few-public-m
 
     # Settings file
     settings_file: str = "settings.json"
-    detail_levels: dict = {}
-    departments_detail_level: float = 0.005
+    detail_level_tolerances: dict = {}
+    departments_simplify_tolerance: float = 0.005
 
     # Geospatial
     data_dir: str = "/app/data"
@@ -62,14 +62,14 @@ class Settings:  # pylint: disable=too-many-instance-attributes,too-few-public-m
     # Alert Generation
     output_dir: str = ""
     alert_cache_dir: str = ""
-    alert_detail_level: int = 7
+    alerts_detail_level: int = 7
 
     # Asynchronous alert generation (background worker pool)
-    alert_job_workers: int = 2
-    alert_job_queue_maxsize: int = 16
-    alert_job_timeout_seconds: float = 150.0
-    alert_supervisor_interval_seconds: float = 30.0
-    alert_job_shutdown_seconds: float = 160.0
+    alerts_job_workers: int = 2
+    alerts_job_queue_maxsize: int = 16
+    alerts_job_timeout_seconds: float = 150.0
+    alerts_supervisor_interval_seconds: float = 30.0
+    alerts_job_shutdown_seconds: float = 160.0
 
     # Job-history store (local SQLite, always-on durable job records).
     jobs_db_path: str = ""
@@ -80,6 +80,26 @@ class Settings:  # pylint: disable=too-many-instance-attributes,too-few-public-m
     metrics_sample_interval_seconds: float = 60.0
     metrics_retention_days: int = 30
     metrics_max_rows: int = 100000
+
+    # settings.json keys accepted after nested groups (layer/alert/metrics) are
+    # flattened. `detail_level_tolerances` / `departments_simplify_tolerance`
+    # are value maps read separately. Unknown keys are warned, not dropped.
+    _JSON_KEYS = frozenset(
+        {
+            "layer_update_cron",
+            "layer_cache_ttl_minutes",
+            "alerts_detail_level",
+            "alerts_job_workers",
+            "alerts_job_queue_maxsize",
+            "alerts_job_timeout_seconds",
+            "alerts_job_shutdown_seconds",
+            "alerts_supervisor_interval_seconds",
+            "metrics_enabled",
+            "metrics_sample_interval_seconds",
+            "metrics_retention_days",
+            "metrics_max_rows",
+        }
+    )
 
     def __init__(self):
         self._load_from_env()
@@ -93,31 +113,66 @@ class Settings:  # pylint: disable=too-many-instance-attributes,too-few-public-m
             raise FileNotFoundError(
                 f"Settings file not found: {self.settings_file}"
             ) from exc
-        self.layer_update_cron = data.get("layer_update_cron", "0 3 * * 0")
-        self.layer_cache_ttl_minutes: int = int(data.get("layer_cache_ttl_minutes", 30))
-        raw = data.get("detail_levels", {})
-        self.detail_levels = {int(k): float(v) for k, v in raw.items()}
-        self.departments_detail_level = float(
-            data.get("departments_detail_level", 0.005)
+        # Geometry-simplify tolerances are value maps keyed by detail level, not
+        # config namespaces — read them before flattening so their entries stay
+        # intact (a generic flatten would explode them into per-level keys).
+        raw_tolerances = data.pop("detail_level_tolerances", {})
+        self.detail_level_tolerances = {
+            int(k): float(v) for k, v in raw_tolerances.items()
+        }
+        self.departments_simplify_tolerance = float(
+            data.pop("departments_simplify_tolerance", 0.005)
         )
-        self.alert_detail_level = int(data.get("alert_detail_level", 7))
-        self.alert_job_workers = int(data.get("alert_job_workers", 2))
-        self.alert_job_queue_maxsize = int(data.get("alert_job_queue_maxsize", 16))
-        self.alert_job_timeout_seconds = float(
-            data.get("alert_job_timeout_seconds", 150.0)
+
+        # Everything else nests under namespace objects (layer, alert, metrics);
+        # flatten to underscore-joined keys so nesting is purely cosmetic and the
+        # flat attribute names below stay unchanged.
+        flat = self._flatten(data)
+        unknown = sorted(set(flat) - self._JSON_KEYS)
+        if unknown:
+            getLogger(__name__).warning(
+                "Ignoring unrecognized settings.json keys: %s", ", ".join(unknown)
+            )
+
+        self.layer_update_cron = flat.get("layer_update_cron", "0 3 * * 0")
+        self.layer_cache_ttl_minutes = int(flat.get("layer_cache_ttl_minutes", 30))
+        self.alerts_detail_level = int(flat.get("alerts_detail_level", 7))
+        self.alerts_job_workers = int(flat.get("alerts_job_workers", 2))
+        self.alerts_job_queue_maxsize = int(flat.get("alerts_job_queue_maxsize", 16))
+        self.alerts_job_timeout_seconds = float(
+            flat.get("alerts_job_timeout_seconds", 150.0)
         )
-        self.alert_supervisor_interval_seconds = float(
-            data.get("alert_supervisor_interval_seconds", 30.0)
+        self.alerts_supervisor_interval_seconds = float(
+            flat.get("alerts_supervisor_interval_seconds", 30.0)
         )
-        self.alert_job_shutdown_seconds = float(
-            data.get("alert_job_shutdown_seconds", 160.0)
+        self.alerts_job_shutdown_seconds = float(
+            flat.get("alerts_job_shutdown_seconds", 160.0)
         )
-        self.metrics_enabled = bool(data.get("metrics_enabled", True))
+        self.metrics_enabled = bool(flat.get("metrics_enabled", True))
         self.metrics_sample_interval_seconds = float(
-            data.get("metrics_sample_interval_seconds", 60.0)
+            flat.get("metrics_sample_interval_seconds", 60.0)
         )
-        self.metrics_retention_days = int(data.get("metrics_retention_days", 30))
-        self.metrics_max_rows = int(data.get("metrics_max_rows", 100000))
+        self.metrics_retention_days = int(flat.get("metrics_retention_days", 30))
+        self.metrics_max_rows = int(flat.get("metrics_max_rows", 100000))
+
+    @staticmethod
+    def _flatten(data: dict) -> dict:
+        """Flatten nested settings objects to underscore-joined flat keys, so
+        settings.json can nest while attribute names stay flat
+        (`alerts.job.workers` -> `alerts_job_workers`). Recurses into dicts only;
+        a nested object wins over a flat key of the same resulting name."""
+        flat: dict = {}
+
+        def _walk(prefix: str, section: dict) -> None:
+            for key, value in section.items():
+                if not isinstance(value, dict):
+                    flat[f"{prefix}{key}"] = value
+            for key, value in section.items():
+                if isinstance(value, dict):
+                    _walk(f"{prefix}{key}_", value)
+
+        _walk("", data)
+        return flat
 
     def _load_from_env(self) -> None:
         self.log_level = os.getenv("LOG_LEVEL", self.log_level)
@@ -185,21 +240,21 @@ class Settings:  # pylint: disable=too-many-instance-attributes,too-few-public-m
         logger.info("LAYER_UPDATE_CRON: %s", self.layer_update_cron)
         logger.info("LAYER_CACHE_TTL_MINUTES: %s", self.layer_cache_ttl_minutes)
 
-        for level, tolerance in self.detail_levels.items():
-            logger.info("DETAIL_LEVEL_%s: %s", level, tolerance)
+        for level, tolerance in self.detail_level_tolerances.items():
+            logger.info("DETAIL_LEVEL_TOLERANCE_%s: %s", level, tolerance)
 
         logger.info(
-            "DEPARTMENTS_DETAIL_LEVEL_TOLERANCE: %s", self.departments_detail_level
+            "DEPARTMENTS_SIMPLIFY_TOLERANCE: %s", self.departments_simplify_tolerance
         )
-        logger.info("ALERT_DETAIL_LEVEL: %s", self.alert_detail_level)
-        logger.info("ALERT_JOB_WORKERS: %s", self.alert_job_workers)
-        logger.info("ALERT_JOB_QUEUE_MAXSIZE: %s", self.alert_job_queue_maxsize)
-        logger.info("ALERT_JOB_TIMEOUT_SECONDS: %s", self.alert_job_timeout_seconds)
+        logger.info("ALERTS_DETAIL_LEVEL: %s", self.alerts_detail_level)
+        logger.info("ALERTS_JOB_WORKERS: %s", self.alerts_job_workers)
+        logger.info("ALERTS_JOB_QUEUE_MAXSIZE: %s", self.alerts_job_queue_maxsize)
+        logger.info("ALERTS_JOB_TIMEOUT_SECONDS: %s", self.alerts_job_timeout_seconds)
         logger.info(
-            "ALERT_SUPERVISOR_INTERVAL_SECONDS: %s",
-            self.alert_supervisor_interval_seconds,
+            "ALERTS_SUPERVISOR_INTERVAL_SECONDS: %s",
+            self.alerts_supervisor_interval_seconds,
         )
-        logger.info("ALERT_JOB_SHUTDOWN_SECONDS: %s", self.alert_job_shutdown_seconds)
+        logger.info("ALERTS_JOB_SHUTDOWN_SECONDS: %s", self.alerts_job_shutdown_seconds)
         logger.info("JOBS_DB_PATH: %s", self.jobs_db_path)
         logger.info("METRICS_ENABLED: %s", self.metrics_enabled)
         logger.info("METRICS_DB_PATH: %s", self.metrics_db_path)
