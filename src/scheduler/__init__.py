@@ -18,7 +18,7 @@ from adapters.geo_layer_processor import GeoLayerProcessor, _WORKER_ENV
 from adapters.s3_storage import S3ObjectStorage
 from ports.geo_layer_processor import IGeoLayerProcessor
 from services.geo_layer_sync_service import GeoLayerSyncService
-from services.geo_layer_sync_service import _extract_date
+from services.geo_layer_sync_service import _extract_date, _retry_async
 from services.layer_refresh_service import LayerRefreshService
 
 _RAW_TMP_FILES = ["pais_raw_tmp.geojson", "departamentos_raw_tmp.geojson"]
@@ -76,21 +76,53 @@ async def _ensure_alert_layers(
         if _local_date(layer["simplified_stem"]) is not None:
             logger.info(f"{layer['simplified_stem']}: ready.")
             continue
+        try:
+            await _generate_alert_layer(
+                settings, logger, processor, layer, tolerance, detail_level
+            )
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            # A transient IGN/S3 failure must not abort startup (see BUG-03); log and
+            # continue so the service comes up, degrading only alert rendering for this
+            # layer until it is regenerated on a later restart/cron.
+            logger.error(
+                "Failed to prepare alert layer %s after retries: %s — continuing "
+                "startup without it",
+                layer["simplified_stem"],
+                exc,
+            )
 
-        logger.info(f"Downloading alert layer: {layer['simplified_stem']} ...")
-        url = getattr(settings, layer["url_attr"])
-        raw_tmp = os.path.join(data_dir, layer["raw_tmp"])
-        simplified_path = os.path.join(
-            data_dir,
-            IGeoLayerProcessor.tolerance_versioned_key(
-                f"{layer['simplified_stem']}_L{detail_level}.geojson", tolerance
-            ),
+
+async def _generate_alert_layer(
+    settings,
+    logger: Logger,
+    processor: GeoLayerProcessor,
+    layer,
+    tolerance,
+    detail_level,
+) -> None:
+    """Download (with retry) and simplify one alert layer; always clean up raw_tmp."""
+    logger.info(f"Downloading alert layer: {layer['simplified_stem']} ...")
+    url = getattr(settings, layer["url_attr"])
+    raw_tmp = os.path.join(settings.data_dir, layer["raw_tmp"])
+    simplified_path = os.path.join(
+        settings.data_dir,
+        IGeoLayerProcessor.tolerance_versioned_key(
+            f"{layer['simplified_stem']}_L{detail_level}.geojson", tolerance
+        ),
+    )
+    try:
+        await _retry_async(
+            processor.download,
+            url,
+            raw_tmp,
+            logger=logger,
+            description=f"download {layer['simplified_stem']}",
         )
-
-        await processor.download(url, raw_tmp)
         await processor.simplify(raw_tmp, simplified_path, tolerance)
-        os.remove(raw_tmp)
-        logger.info(f"{layer['simplified_stem']}: ready.")
+    finally:
+        if os.path.exists(raw_tmp):
+            os.remove(raw_tmp)
+    logger.info(f"{layer['simplified_stem']}: ready.")
 
 
 _CACHE_WORKER_PATH = os.path.abspath(

@@ -35,6 +35,41 @@ def _extract_date(key: str) -> str | None:
     return None
 
 
+async def _retry_async(
+    func,
+    *args,
+    logger: Logger,
+    description: str,
+    retries: int = 3,
+    backoff_base: float = 2.0,
+):
+    """Await ``func(*args)`` with bounded exponential backoff; re-raise on final fail.
+
+    A fresh awaitable is created per attempt (a coroutine can only be awaited once),
+    so only transient external I/O (IGN download, S3 upload) should be routed here.
+    Shared by GeoLayerSyncService and the scheduler's alert-layer preparation.
+    """
+    last_exc: Exception | None = None
+    for attempt in range(1, retries + 1):
+        try:
+            return await func(*args)
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            last_exc = exc
+            if attempt < retries:
+                delay = backoff_base ** (attempt - 1)
+                logger.warning(
+                    "%s failed (attempt %d/%d): %s — retrying in %.1fs",
+                    description,
+                    attempt,
+                    retries,
+                    exc,
+                    delay,
+                )
+                await asyncio.sleep(delay)
+    assert last_exc is not None
+    raise last_exc
+
+
 class GeoLayerSyncService:  # pylint: disable=too-few-public-methods
     """Ensures local filesystem and S3 are consistent for all geo layer files.
 
@@ -148,30 +183,15 @@ class GeoLayerSyncService:  # pylint: disable=too-few-public-methods
                 os.remove(raw_tmp)
 
     async def _retry(self, func, *args, description: str):
-        """Await ``func(*args)`` with bounded exponential backoff; re-raise on final fail.
-
-        A fresh awaitable is created per attempt (a coroutine can only be awaited
-        once). Only transient external I/O should be routed through here.
-        """
-        last_exc: Exception | None = None
-        for attempt in range(1, self._MAX_RETRIES + 1):
-            try:
-                return await func(*args)
-            except Exception as exc:  # pylint: disable=broad-exception-caught
-                last_exc = exc
-                if attempt < self._MAX_RETRIES:
-                    delay = self._RETRY_BACKOFF_BASE ** (attempt - 1)
-                    self.logger.warning(
-                        "%s failed (attempt %d/%d): %s — retrying in %.1fs",
-                        description,
-                        attempt,
-                        self._MAX_RETRIES,
-                        exc,
-                        delay,
-                    )
-                    await asyncio.sleep(delay)
-        assert last_exc is not None
-        raise last_exc
+        """Await ``func(*args)`` with this service's bounded exponential backoff."""
+        return await _retry_async(
+            func,
+            *args,
+            logger=self.logger,
+            description=description,
+            retries=self._MAX_RETRIES,
+            backoff_base=self._RETRY_BACKOFF_BASE,
+        )
 
     async def _reconcile_simplified(
         self, layer: dict, level: int | None, tolerance: float
