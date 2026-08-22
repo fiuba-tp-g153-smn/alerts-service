@@ -30,7 +30,14 @@ class GeoJSONInput(BaseModel):
         return v
 
     def extract_geometry(self) -> Dict[str, Any]:
-        """Extract the geometry dict from any GeoJSON wrapper type."""
+        """Extract the geometry dict from a GeoJSON Geometry, Feature, or FeatureCollection.
+
+        A FeatureCollection must hold exactly one feature: an empty or multi-feature
+        collection raises ValueError rather than silently dropping features[1:]. Any
+        input whose resolved geometry is missing/empty/invalid also raises, instead of
+        returning ``{}`` — so callers get a clear 400 instead of a silently partial or
+        empty intersection.
+        """
         data = self.model_dump()
         geojson_type = data.get("type", "").lower()
 
@@ -38,10 +45,20 @@ class GeoJSONInput(BaseModel):
             features = data.get("features", [])
             if not features:
                 raise ValueError("FeatureCollection is empty")
-            return features[0].get("geometry") or {}
-        if geojson_type == "feature":
-            return data.get("geometry") or {}
-        return data
+            if len(features) > 1:
+                raise ValueError(
+                    f"FeatureCollection must contain exactly one feature "
+                    f"(got {len(features)}); send a single Feature or Geometry"
+                )
+            geometry = features[0].get("geometry")
+        elif geojson_type == "feature":
+            geometry = data.get("geometry")
+        else:
+            geometry = data
+
+        if not isinstance(geometry, dict) or not geometry:
+            raise ValueError("GeoJSON has no valid geometry")
+        return geometry
 
 
 class AlertCreateRequest(BaseModel):

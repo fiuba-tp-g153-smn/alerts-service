@@ -59,29 +59,30 @@ def test_non_dict_input_raises():
         GeoJSONInput.model_validate("not a dict")
 
 
-def test_extract_geometry_feature_with_null_geometry_returns_empty_dict():
+def test_extract_geometry_feature_with_null_geometry_raises():
+    # BUG-06: a missing geometry must raise (→ 400), not silently return {}.
     data = {"type": "Feature", "geometry": None, "properties": {}}
     obj = GeoJSONInput(**data)
-    result = obj.extract_geometry()
-    assert result == {}
+    with pytest.raises(ValueError):
+        obj.extract_geometry()
 
 
-def test_extract_geometry_feature_collection_uses_first_feature_only():
-    first_geom = {"type": "Point", "coordinates": [1, 2]}
-    second_geom = {"type": "Point", "coordinates": [3, 4]}
+def test_extract_geometry_multi_feature_collection_raises():
+    # BUG-06: a multi-feature collection must be rejected, not silently reduced
+    # to features[0].
     data = {
         "type": "FeatureCollection",
         "features": [
-            {"type": "Feature", "geometry": first_geom, "properties": {}},
-            {"type": "Feature", "geometry": second_geom, "properties": {}},
+            {"type": "Feature", "geometry": {"type": "Point", "coordinates": [1, 2]}},
+            {"type": "Feature", "geometry": {"type": "Point", "coordinates": [3, 4]}},
         ],
     }
     obj = GeoJSONInput(**data)
-    result = obj.extract_geometry()
-    assert result == first_geom
+    with pytest.raises(ValueError, match="exactly one feature"):
+        obj.extract_geometry()
 
 
-def test_extract_geometry_feature_collection_with_none_geometry_in_first_feature_returns_empty_dict():
+def test_extract_geometry_feature_collection_with_none_geometry_raises():
     data = {
         "type": "FeatureCollection",
         "features": [
@@ -89,8 +90,8 @@ def test_extract_geometry_feature_collection_with_none_geometry_in_first_feature
         ],
     }
     obj = GeoJSONInput(**data)
-    result = obj.extract_geometry()
-    assert result == {}
+    with pytest.raises(ValueError):
+        obj.extract_geometry()
 
 
 def test_extract_geometry_geometry_type_passthrough_with_extra_fields():
