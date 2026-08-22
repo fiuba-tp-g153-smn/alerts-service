@@ -110,7 +110,13 @@ async def get_processor_history(
     metrics: IProcessorMetricsRepository = Depends(get_metrics_repo),
 ) -> List[ProcessorSamplePoint]:
     """Processor snapshots (queue depth, pending, counters) for trend charts."""
-    rows = await metrics.get_processor_history(_since_iso(hours))
+    # Processor telemetry is best-effort: if metrics is disabled/unavailable the
+    # repo is never connected and raises, so return an empty series instead of a
+    # 500 — consistent with get_summary's handling of the processor snapshot.
+    try:
+        rows = await metrics.get_processor_history(_since_iso(hours))
+    except Exception:  # pylint: disable=broad-exception-caught
+        return []
     return [ProcessorSamplePoint(**asdict(r)) for r in rows]
 
 
