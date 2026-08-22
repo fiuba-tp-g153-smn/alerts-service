@@ -21,6 +21,14 @@ def upgrade() -> None:
     op.execute(
         "ALTER TABLE `departamentos_email` MODIFY COLUMN `id_localidad` varchar(10) NOT NULL;"
     )
+    # Intentional destructive reset of reference + recipient data.
+    # This migration re-seeds departamentos/provincia with new official
+    # id_localidad values, so any existing rows in the *_email recipient tables
+    # (which FK-reference departamentos.id_localidad) would dangle against the new
+    # IDs. They are therefore truncated on purpose — recipients must be re-registered
+    # after this migration runs. This is a canonical-reference RESET: it assumes an
+    # empty/resettable database (gated by MANAGE_DB_SCHEMAS) and is NOT safe to run
+    # against a populated production DB whose recipient data must be preserved.
     op.execute("TRUNCATE TABLE `departamentos_email`;")
     op.execute("TRUNCATE TABLE `provincia_email`;")
     op.execute("TRUNCATE TABLE `departamentos`;")
@@ -606,4 +614,7 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    pass  # Este script truncó tablas, hacer downgrade requeriría restaurar datos
+    # Intentionally irreversible: upgrade() performs a destructive TRUNCATE + reseed
+    # of reference and recipient data, so there is no prior state to restore here.
+    # To roll back, reset the schema and re-run migrations rather than downgrading.
+    pass
