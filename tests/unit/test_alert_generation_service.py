@@ -15,12 +15,23 @@ _POLY = Polygon([(-58.5, -34.6), (-58.4, -34.6), (-58.4, -34.5), (-58.5, -34.6)]
 
 @pytest.fixture(autouse=True)
 def _reset_merc_caches():
-    """Mercator projection caches are module globals — reset around each test."""
-    svc_mod._DEPT_INDEX_MERC_CACHE = None
-    svc_mod._PROV_GEOMS_MERC_CACHE = None
+    """Projection/serialization caches are module globals — reset around each test."""
+    for _name in (
+        "_DEPT_INDEX_MERC_CACHE",
+        "_PROV_GEOMS_MERC_CACHE",
+        "_DEPT_INDEX_SERIALIZED_CACHE",
+        "_PROV_GEOMS_SERIALIZED_CACHE",
+    ):
+        setattr(svc_mod, _name, None)
     yield
-    svc_mod._DEPT_INDEX_MERC_CACHE = None
-    svc_mod._PROV_GEOMS_MERC_CACHE = None
+    for _name in (
+        "_DEPT_INDEX_MERC_CACHE",
+        "_PROV_GEOMS_MERC_CACHE",
+        "_DEPT_INDEX_SERIALIZED_CACHE",
+        "_PROV_GEOMS_SERIALIZED_CACHE",
+    ):
+        setattr(svc_mod, _name, None)
+
 
 GEOMETRY = {
     "type": "Polygon",
@@ -202,6 +213,54 @@ async def test_get_dept_index_merc_projects_once_and_caches():
     second = await AlertGenerationService._get_dept_index_merc([])
     assert first is second
     assert len(first) == 1
+
+
+async def test_get_dept_index_serialized_computes_once_and_caches():
+    # PERF-01: WKB-hex serialization is computed once, then reused across requests.
+    merc = [(_POLY.bounds, _POLY)]
+    first = await AlertGenerationService._get_dept_index_serialized(merc)
+    second = await AlertGenerationService._get_dept_index_serialized([])
+    assert first is second
+    assert first[0]["bbox"] == list(_POLY.bounds)
+    assert isinstance(first[0]["wkb_hex"], str) and first[0]["wkb_hex"]
+
+
+async def test_get_prov_geoms_serialized_computes_once_and_caches():
+    first = await AlertGenerationService._get_prov_geoms_serialized([_POLY])
+    second = await AlertGenerationService._get_prov_geoms_serialized([])
+    assert first is second
+    assert isinstance(first[0], str) and first[0]
+
+
+def test_build_worker_payload_contains_all_worker_fields(service):
+    service.settings.output_dir = "/out"
+    service.settings.alert_cache_dir = "/cache"
+
+    payload = service._build_worker_payload(
+        GEOMETRY,
+        "TEXT",
+        "250101000000",
+        [],
+        [],
+        [{"bbox": [0, 0, 1, 1], "wkb_hex": "00"}],
+        ["00"],
+    )
+
+    import json as _json
+
+    data = _json.loads(payload)
+    assert set(data) == {
+        "geometry_wkb_hex",
+        "phenomenon_text",
+        "timestamp",
+        "affected_departments",
+        "all_departments",
+        "output_dir",
+        "cache_dir",
+        "dept_index_serialized",
+        "prov_geoms_serialized",
+    }
+    assert data["dept_index_serialized"] == [{"bbox": [0, 0, 1, 1], "wkb_hex": "00"}]
 
 
 async def test_prewarm_render_geometry_is_best_effort(service, tmp_path):
