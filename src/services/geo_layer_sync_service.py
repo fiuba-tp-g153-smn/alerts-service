@@ -1,5 +1,6 @@
 """Service that ensures local filesystem and S3 are consistent for all geo layer files."""
 
+import asyncio
 import glob as _glob
 import os
 from logging import Logger
@@ -44,6 +45,11 @@ class GeoLayerSyncService:  # pylint: disable=too-few-public-methods
     - Returns which layers/levels need re-generation.
     """
 
+    # Bounded exponential backoff for transient external I/O (IGN download, S3
+    # upload). Overridable in tests to avoid real sleeps.
+    _MAX_RETRIES = 3
+    _RETRY_BACKOFF_BASE = 2.0
+
     def __init__(
         self,
         settings: "Settings",
@@ -81,35 +87,91 @@ class GeoLayerSyncService:  # pylint: disable=too-few-public-methods
         return needs_regen
 
     async def regenerate(self) -> None:
-        """Download from IGN and re-generate any files flagged missing by ensure_all()."""
+        """Download from IGN and re-generate any files flagged missing by ensure_all().
+
+        Each layer is regenerated independently: a transient failure (after bounded
+        retries) is logged and skipped rather than propagated, so one bad IGN/S3 hop
+        can never abort application startup — it only leaves that layer missing,
+        degrading the endpoints that need it instead of the whole service.
+        """
         data_dir = self.settings.data_dir
         for layer, missing_levels in self._needs_regen:
-            self.logger.info(f"Re-generating layer: {layer['simplified_stem']} ...")
-            url = getattr(self.settings, layer["url_attr"])
-            raw_tmp = os.path.join(data_dir, layer["raw_tmp"])
-
             try:
-                await self.processor.download(url, raw_tmp)
+                await self._regenerate_layer(layer, missing_levels, data_dir)
+            except Exception as exc:  # pylint: disable=broad-exception-caught
+                self.logger.error(
+                    "Failed to regenerate layer %s after retries: %s — continuing "
+                    "startup without it",
+                    layer["simplified_stem"],
+                    exc,
+                )
 
-                for level, tolerance in missing_levels:
-                    stem = (
-                        layer["simplified_stem"]
-                        if level is None
-                        else f"{layer['simplified_stem']}_L{level}"
+        self.logger.info("Geo layer regeneration complete.")
+
+    async def _regenerate_layer(
+        self, layer: dict, missing_levels: list, data_dir: str
+    ) -> None:
+        """Download the raw layer and (re)generate + upload each missing level."""
+        self.logger.info(f"Re-generating layer: {layer['simplified_stem']} ...")
+        url = getattr(self.settings, layer["url_attr"])
+        raw_tmp = os.path.join(data_dir, layer["raw_tmp"])
+
+        try:
+            await self._retry(
+                self.processor.download,
+                url,
+                raw_tmp,
+                description=f"download {layer['simplified_stem']}",
+            )
+
+            for level, tolerance in missing_levels:
+                stem = (
+                    layer["simplified_stem"]
+                    if level is None
+                    else f"{layer['simplified_stem']}_L{level}"
+                )
+                versioned = IGeoLayerProcessor.tolerance_versioned_key(
+                    f"{stem}.geojson", tolerance
+                )
+                simplified_path = os.path.join(data_dir, versioned)
+                await self.processor.simplify(raw_tmp, simplified_path, tolerance)
+                if self.settings.s3_bucket_name:
+                    await self._retry(
+                        self.storage.upload,
+                        simplified_path,
+                        versioned,
+                        description=f"upload {versioned}",
                     )
-                    versioned = IGeoLayerProcessor.tolerance_versioned_key(
-                        f"{stem}.geojson", tolerance
+
+        finally:
+            if os.path.exists(raw_tmp):
+                os.remove(raw_tmp)
+
+    async def _retry(self, func, *args, description: str):
+        """Await ``func(*args)`` with bounded exponential backoff; re-raise on final fail.
+
+        A fresh awaitable is created per attempt (a coroutine can only be awaited
+        once). Only transient external I/O should be routed through here.
+        """
+        last_exc: Exception | None = None
+        for attempt in range(1, self._MAX_RETRIES + 1):
+            try:
+                return await func(*args)
+            except Exception as exc:  # pylint: disable=broad-exception-caught
+                last_exc = exc
+                if attempt < self._MAX_RETRIES:
+                    delay = self._RETRY_BACKOFF_BASE ** (attempt - 1)
+                    self.logger.warning(
+                        "%s failed (attempt %d/%d): %s — retrying in %.1fs",
+                        description,
+                        attempt,
+                        self._MAX_RETRIES,
+                        exc,
+                        delay,
                     )
-                    simplified_path = os.path.join(data_dir, versioned)
-                    await self.processor.simplify(raw_tmp, simplified_path, tolerance)
-                    if self.settings.s3_bucket_name:
-                        await self.storage.upload(simplified_path, versioned)
-
-            finally:
-                if os.path.exists(raw_tmp):
-                    os.remove(raw_tmp)
-
-        self.logger.info("All geo layers are ready.")
+                    await asyncio.sleep(delay)
+        assert last_exc is not None
+        raise last_exc
 
     async def _reconcile_simplified(
         self, layer: dict, level: int | None, tolerance: float
