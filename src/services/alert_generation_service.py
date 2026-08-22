@@ -170,26 +170,33 @@ class AlertGenerationService:  # pylint: disable=too-few-public-methods
         )
         self.logger.info("polygon str value: %s", polygon_str)
 
-        # 5b. Validate area HTML against the DB column limit before insert, so an
-        # oversized affected area becomes an actionable error instead of a raw
-        # MySQL DataError. Only knowable now (depends on the intersection result).
-        t_persist = time.perf_counter()
-        await self._validate_area_size(area_html, len(affected_departments))
+        try:
+            # 5b. Validate area HTML against the DB column limit before insert, so an
+            # oversized affected area becomes an actionable error instead of a raw
+            # MySQL DataError. Only knowable now (depends on the intersection result).
+            t_persist = time.perf_counter()
+            await self._validate_area_size(area_html, len(affected_departments))
 
-        # Extract just the filename from full path (persisted in DB and used for URL)
-        gif_area_filename = os.path.basename(worker_result["gif_area"])
-        gif_gral_filename = os.path.basename(worker_result["gif_gral"])
+            # Extract just the filename from full path (persisted in DB, used for URL)
+            gif_area_filename = os.path.basename(worker_result["gif_area"])
+            gif_gral_filename = os.path.basename(worker_result["gif_gral"])
 
-        # DB write off the event loop (see get_departments above).
-        alert_id = await asyncio.to_thread(
-            self.mysql_repo.insert_alert,
-            phenomenon_text,
-            area_html,
-            polygon_str,
-            gif_general=gif_gral_filename,
-            gif_zoom=gif_area_filename,
-        )
-        persist_ms = int((time.perf_counter() - t_persist) * 1000)
+            # DB write off the event loop (see get_departments above).
+            alert_id = await asyncio.to_thread(
+                self.mysql_repo.insert_alert,
+                phenomenon_text,
+                area_html,
+                polygon_str,
+                gif_general=gif_gral_filename,
+                gif_zoom=gif_area_filename,
+            )
+            persist_ms = int((time.perf_counter() - t_persist) * 1000)
+        except Exception:
+            # BUG-02: the GIFs were already rendered to the public output dir; a
+            # failure here (AreaTooLargeError, an insert error, …) would orphan them
+            # with no DB row referencing them. Remove both, then re-raise.
+            self._remove_files(worker_result["gif_area"], worker_result["gif_gral"])
+            raise
 
         duration = time.perf_counter() - t0
         self.logger.info(f"Alert {alert_id} generated in {duration:.2f}s")
@@ -212,6 +219,14 @@ class AlertGenerationService:  # pylint: disable=too-few-public-methods
             "persist_ms": persist_ms,
         }
 
+    def _remove_files(self, *paths: str) -> None:
+        """Best-effort removal of files — cleanup for orphaned render output."""
+        for path in paths:
+            try:
+                os.remove(path)
+            except OSError as exc:
+                self.logger.warning("Could not remove orphaned file %s: %s", path, exc)
+
     async def _filter_departments_by_departments(  # pylint: disable=too-many-locals
         self, geometry: dict, departments: List[dict], all_departments: List[dict]
     ) -> List[dict]:
@@ -225,7 +240,9 @@ class AlertGenerationService:  # pylint: disable=too-few-public-methods
         if not input_geom.is_valid:
             input_geom = input_geom.buffer(0)
 
-        threshold = 0.001  # minimum department coverage fraction (same as genero_aviso.py)
+        threshold = (
+            0.001  # minimum department coverage fraction (same as genero_aviso.py)
+        )
 
         # Load full department geometries from cached index (double-checked locking)
         dept_index_path = os.path.join(self.settings.alert_cache_dir, "dept_index.pkl")

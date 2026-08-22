@@ -134,6 +134,56 @@ async def test_generate_alert_raises_when_area_too_large(service):
     service.mysql_repo.insert_alert.assert_not_called()
 
 
+def _stub_worker_with_real_gifs(service, tmp_path):
+    """Point the render worker at two real files so cleanup can be asserted."""
+    gif_area = tmp_path / "zoom_alerta.gif"
+    gif_gral = tmp_path / "gral_alerta.gif"
+    gif_area.write_bytes(b"gif")
+    gif_gral.write_bytes(b"gif")
+    service._run_visualization_worker = AsyncMock(
+        return_value={
+            "status": "success",
+            "gif_area": str(gif_area),
+            "gif_gral": str(gif_gral),
+        }
+    )
+    return gif_area, gif_gral
+
+
+async def test_generate_alert_removes_gifs_when_area_too_large(service, tmp_path):
+    # BUG-02: GIFs rendered before validation must be cleaned up on AreaTooLargeError.
+    gif_area, gif_gral = _stub_worker_with_real_gifs(service, tmp_path)
+    service.mysql_repo.get_area_max_length.return_value = 5
+
+    with pytest.raises(AreaTooLargeError):
+        await service.generate_alert(GEOMETRY, phenomenon_code=10)
+
+    assert not gif_area.exists()
+    assert not gif_gral.exists()
+
+
+async def test_generate_alert_removes_gifs_when_insert_fails(service, tmp_path):
+    # BUG-02: an insert failure after render must not orphan the GIFs either.
+    gif_area, gif_gral = _stub_worker_with_real_gifs(service, tmp_path)
+    service.mysql_repo.insert_alert.side_effect = RuntimeError("db down")
+
+    with pytest.raises(RuntimeError, match="db down"):
+        await service.generate_alert(GEOMETRY, phenomenon_code=10)
+
+    assert not gif_area.exists()
+    assert not gif_gral.exists()
+
+
+async def test_generate_alert_keeps_gifs_on_success(service, tmp_path):
+    # Regression: the cleanup must NOT delete GIFs on the success path.
+    gif_area, gif_gral = _stub_worker_with_real_gifs(service, tmp_path)
+
+    await service.generate_alert(GEOMETRY, phenomenon_code=10)
+
+    assert gif_area.exists()
+    assert gif_gral.exists()
+
+
 def test_project_index_to_mercator_keeps_bbox_and_uses_metres():
     bbox = _POLY.bounds
     out = AlertGenerationService._project_index_to_mercator([(bbox, _POLY)])
