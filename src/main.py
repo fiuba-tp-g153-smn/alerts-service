@@ -132,11 +132,13 @@ app: FastAPI = FastAPI(
     lifespan=lifespan,
 )
 
-# Configure CORS
+# Configure CORS. Endpoints are open by design, so any origin is allowed.
+# allow_credentials is intentionally omitted: combining it with allow_origins=["*"]
+# is invalid per the CORS spec (Starlette would reflect the request Origin instead
+# of "*"), and the service uses no cookies/sessions, so credentials are never sent.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
     # Let browsers read the ETag of /alerts and /alerts/pending so the

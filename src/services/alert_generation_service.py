@@ -61,6 +61,16 @@ _DEPT_INDEX_MERC_LOCK = asyncio.Lock()
 _PROV_GEOMS_MERC_CACHE: list | None = None
 _PROV_GEOMS_MERC_LOCK = asyncio.Lock()
 
+# WKB-hex serialization of the Mercator dept/prov geometries sent to the render
+# worker. The source geometries are immutable after prewarm, so their serialized
+# form is invariant too — compute it once instead of re-dumping ~53k vertices to
+# WKB-hex on the event loop on every alert (PERF-01).
+_DEPT_INDEX_SERIALIZED_CACHE: list | None = None
+_DEPT_INDEX_SERIALIZED_LOCK = asyncio.Lock()
+
+_PROV_GEOMS_SERIALIZED_CACHE: list | None = None
+_PROV_GEOMS_SERIALIZED_LOCK = asyncio.Lock()
+
 
 class AlertGenerationService:  # pylint: disable=too-few-public-methods
     """Generates weather alert maps and persists to database."""
@@ -170,26 +180,33 @@ class AlertGenerationService:  # pylint: disable=too-few-public-methods
         )
         self.logger.info("polygon str value: %s", polygon_str)
 
-        # 5b. Validate area HTML against the DB column limit before insert, so an
-        # oversized affected area becomes an actionable error instead of a raw
-        # MySQL DataError. Only knowable now (depends on the intersection result).
-        t_persist = time.perf_counter()
-        await self._validate_area_size(area_html, len(affected_departments))
+        try:
+            # 5b. Validate area HTML against the DB column limit before insert, so an
+            # oversized affected area becomes an actionable error instead of a raw
+            # MySQL DataError. Only knowable now (depends on the intersection result).
+            t_persist = time.perf_counter()
+            await self._validate_area_size(area_html, len(affected_departments))
 
-        # Extract just the filename from full path (persisted in DB and used for URL)
-        gif_area_filename = os.path.basename(worker_result["gif_area"])
-        gif_gral_filename = os.path.basename(worker_result["gif_gral"])
+            # Extract just the filename from full path (persisted in DB, used for URL)
+            gif_area_filename = os.path.basename(worker_result["gif_area"])
+            gif_gral_filename = os.path.basename(worker_result["gif_gral"])
 
-        # DB write off the event loop (see get_departments above).
-        alert_id = await asyncio.to_thread(
-            self.mysql_repo.insert_alert,
-            phenomenon_text,
-            area_html,
-            polygon_str,
-            gif_general=gif_gral_filename,
-            gif_zoom=gif_area_filename,
-        )
-        persist_ms = int((time.perf_counter() - t_persist) * 1000)
+            # DB write off the event loop (see get_departments above).
+            alert_id = await asyncio.to_thread(
+                self.mysql_repo.insert_alert,
+                phenomenon_text,
+                area_html,
+                polygon_str,
+                gif_general=gif_gral_filename,
+                gif_zoom=gif_area_filename,
+            )
+            persist_ms = int((time.perf_counter() - t_persist) * 1000)
+        except Exception:
+            # BUG-02: the GIFs were already rendered to the public output dir; a
+            # failure here (AreaTooLargeError, an insert error, …) would orphan them
+            # with no DB row referencing them. Remove both, then re-raise.
+            self._remove_files(worker_result["gif_area"], worker_result["gif_gral"])
+            raise
 
         duration = time.perf_counter() - t0
         self.logger.info(f"Alert {alert_id} generated in {duration:.2f}s")
@@ -212,6 +229,14 @@ class AlertGenerationService:  # pylint: disable=too-few-public-methods
             "persist_ms": persist_ms,
         }
 
+    def _remove_files(self, *paths: str) -> None:
+        """Best-effort removal of files — cleanup for orphaned render output."""
+        for path in paths:
+            try:
+                os.remove(path)
+            except OSError as exc:
+                self.logger.warning("Could not remove orphaned file %s: %s", path, exc)
+
     async def _filter_departments_by_departments(  # pylint: disable=too-many-locals
         self, geometry: dict, departments: List[dict], all_departments: List[dict]
     ) -> List[dict]:
@@ -225,7 +250,9 @@ class AlertGenerationService:  # pylint: disable=too-few-public-methods
         if not input_geom.is_valid:
             input_geom = input_geom.buffer(0)
 
-        threshold = 0.001  # minimum department coverage fraction (same as genero_aviso.py)
+        threshold = (
+            0.001  # minimum department coverage fraction (same as genero_aviso.py)
+        )
 
         # Load full department geometries from cached index (double-checked locking)
         dept_index_path = os.path.join(self.settings.alert_cache_dir, "dept_index.pkl")
@@ -323,6 +350,43 @@ class AlertGenerationService:  # pylint: disable=too-few-public-methods
         return _PROV_GEOMS_MERC_CACHE
 
     @staticmethod
+    async def _get_dept_index_serialized(dept_index_merc: list) -> list:
+        """Return dept_index_merc as [{bbox, wkb_hex}] (computed once, cached — PERF-01)."""
+        global _DEPT_INDEX_SERIALIZED_CACHE  # pylint: disable=global-statement
+        if _DEPT_INDEX_SERIALIZED_CACHE is None:
+            async with _DEPT_INDEX_SERIALIZED_LOCK:
+                if _DEPT_INDEX_SERIALIZED_CACHE is None:
+                    _DEPT_INDEX_SERIALIZED_CACHE = await asyncio.to_thread(
+                        AlertGenerationService._serialize_dept_index, dept_index_merc
+                    )
+        return _DEPT_INDEX_SERIALIZED_CACHE
+
+    @staticmethod
+    def _serialize_dept_index(dept_index_merc: list) -> list:
+        """Serialize (bbox, geom) pairs to [{bbox, wkb_hex}] (CPU-bound; runs in thread)."""
+        return [
+            {"bbox": list(bbox), "wkb_hex": shapely_wkb.dumps(geom, hex=True)}
+            for bbox, geom in dept_index_merc
+        ]
+
+    @staticmethod
+    async def _get_prov_geoms_serialized(prov_geoms_merc: list) -> list:
+        """Return prov_geoms_merc as a list of WKB-hex strings (computed once, cached)."""
+        global _PROV_GEOMS_SERIALIZED_CACHE  # pylint: disable=global-statement
+        if _PROV_GEOMS_SERIALIZED_CACHE is None:
+            async with _PROV_GEOMS_SERIALIZED_LOCK:
+                if _PROV_GEOMS_SERIALIZED_CACHE is None:
+                    _PROV_GEOMS_SERIALIZED_CACHE = await asyncio.to_thread(
+                        AlertGenerationService._serialize_prov_geoms, prov_geoms_merc
+                    )
+        return _PROV_GEOMS_SERIALIZED_CACHE
+
+    @staticmethod
+    def _serialize_prov_geoms(prov_geoms_merc: list) -> list:
+        """Serialize geometries to WKB-hex strings (CPU-bound; runs in thread)."""
+        return [shapely_wkb.dumps(geom, hex=True) for geom in prov_geoms_merc]
+
+    @staticmethod
     def _project_index_to_mercator(index: list) -> list:
         """Project each geometry in a (bbox, geom) index list to ccrs.Mercator()."""
         pc = ccrs.PlateCarree()
@@ -391,11 +455,38 @@ class AlertGenerationService:  # pylint: disable=too-few-public-methods
             prov_index = await self._get_prov_index(
                 os.path.join(cache_dir, "prov_index.pkl")
             )
-            await self._get_dept_index_merc(dept_index or [])
-            await self._get_prov_geoms_merc(prov_index or [])
-            self.logger.info("Render geometry pre-warmed (dept/prov → Mercator)")
+            dept_merc = await self._get_dept_index_merc(dept_index or [])
+            prov_merc = await self._get_prov_geoms_merc(prov_index or [])
+            await self._get_dept_index_serialized(dept_merc)
+            await self._get_prov_geoms_serialized(prov_merc)
+            self.logger.info("Render geometry pre-warmed (dept/prov → Mercator + WKB)")
         except Exception as exc:  # pylint: disable=broad-exception-caught
             self.logger.warning("Render-geometry pre-warm failed: %s", exc)
+
+    def _build_worker_payload(  # pylint: disable=too-many-arguments
+        self,
+        geometry,
+        phenomenon_text,
+        timestamp,
+        affected_departments,
+        all_departments,
+        dept_index_serialized,
+        prov_geoms_serialized,
+    ) -> str:
+        """Serialize the render worker's stdin payload to a JSON string (CPU-bound)."""
+        return json.dumps(
+            {
+                "geometry_wkb_hex": shapely_wkb.dumps(shape(geometry), hex=True),
+                "phenomenon_text": phenomenon_text,
+                "timestamp": timestamp,
+                "affected_departments": affected_departments,
+                "all_departments": all_departments,
+                "output_dir": self.settings.output_dir,
+                "cache_dir": self.settings.alert_cache_dir,
+                "dept_index_serialized": dept_index_serialized,
+                "prov_geoms_serialized": prov_geoms_serialized,
+            }
+        )
 
     async def _run_visualization_worker(
         self,
@@ -416,26 +507,21 @@ class AlertGenerationService:  # pylint: disable=too-few-public-methods
         dept_index_merc = await self._get_dept_index_merc(dept_index or [])
         prov_geoms_merc = await self._get_prov_geoms_merc(prov_index or [])
 
-        dept_index_serialized = [
-            {"bbox": list(bbox), "wkb_hex": shapely_wkb.dumps(geom, hex=True)}
-            for bbox, geom in dept_index_merc
-        ]
-        prov_geoms_serialized = [
-            shapely_wkb.dumps(geom, hex=True) for geom in prov_geoms_merc
-        ]
+        dept_index_serialized = await self._get_dept_index_serialized(dept_index_merc)
+        prov_geoms_serialized = await self._get_prov_geoms_serialized(prov_geoms_merc)
 
-        payload = json.dumps(
-            {
-                "geometry_wkb_hex": shapely_wkb.dumps(shape(geometry), hex=True),
-                "phenomenon_text": phenomenon_text,
-                "timestamp": timestamp,
-                "affected_departments": affected_departments,
-                "all_departments": all_departments,
-                "output_dir": self.settings.output_dir,
-                "cache_dir": self.settings.alert_cache_dir,
-                "dept_index_serialized": dept_index_serialized,
-                "prov_geoms_serialized": prov_geoms_serialized,
-            }
+        # Build the payload off the event loop: even with the static index cached,
+        # json.dumps of the whole payload (plus the per-request geometry WKB) is
+        # non-trivial CPU that must not block the loop on the hot path (PERF-01).
+        payload = await asyncio.to_thread(
+            self._build_worker_payload,
+            geometry,
+            phenomenon_text,
+            timestamp,
+            affected_departments,
+            all_departments,
+            dept_index_serialized,
+            prov_geoms_serialized,
         )
 
         async with _ALERT_VIZ_SEMAPHORE:

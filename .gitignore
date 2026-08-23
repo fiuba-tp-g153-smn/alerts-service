@@ -75,3 +75,5 @@ tests/departments_*.geojson
 
 .claude
 .mypy_cache
+
+CODE_REVIEW.md

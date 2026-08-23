@@ -53,10 +53,20 @@ async def _run_worker(task: list[dict]) -> None:
         raise subprocess.CalledProcessError(proc.returncode, sys.executable, stderr)
 
 
-def _write_bytes_to_file(path: str, data: bytes) -> None:
-    """Write bytes to file (blocking I/O, meant for asyncio.to_thread)."""
-    with open(path, "wb") as f:
-        f.write(data)
+# Stream downloads in 1 MiB chunks so the full-resolution national GeoJSON
+# (~100+ MB) is never buffered whole in the main process — only one chunk is
+# resident at a time (CLAUDE.md "stream large files").
+_DOWNLOAD_CHUNK_SIZE = 1024 * 1024
+
+
+async def _stream_to_file(resp: aiohttp.ClientResponse, path: str) -> None:
+    """Stream an aiohttp response body to a file in chunks, writing off the loop."""
+    file = await asyncio.to_thread(open, path, "wb")
+    try:
+        async for chunk in resp.content.iter_chunked(_DOWNLOAD_CHUNK_SIZE):
+            await asyncio.to_thread(file.write, chunk)
+    finally:
+        await asyncio.to_thread(file.close)
 
 
 class GeoLayerProcessor(IGeoLayerProcessor):
@@ -66,14 +76,26 @@ class GeoLayerProcessor(IGeoLayerProcessor):
         self._logger = logger
 
     async def download(self, url: str, out_path: str) -> None:
+        """Stream a URL to ``out_path`` in chunks (never buffering the whole body).
+
+        The body is written to a ``.tmp`` sidecar then atomically renamed, so a
+        partial download never masquerades as a complete file. The ``.tmp`` name
+        also matches the scheduler's orphaned-tmp sweep as a backstop.
+        """
         self._logger.info(f"Downloading {url} ...")
-        async with aiohttp.ClientSession() as session:
-            async with session.get(
-                url, timeout=aiohttp.ClientTimeout(total=600)
-            ) as resp:
-                resp.raise_for_status()
-                content = await resp.read()
-        await asyncio.to_thread(_write_bytes_to_file, out_path, content)
+        tmp_path = f"{out_path}.tmp"
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(
+                    url, timeout=aiohttp.ClientTimeout(total=600)
+                ) as resp:
+                    resp.raise_for_status()
+                    await _stream_to_file(resp, tmp_path)
+            await asyncio.to_thread(os.replace, tmp_path, out_path)
+        except Exception:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+            raise
         size_mb = os.path.getsize(out_path) / 1_048_576
         self._logger.info(f"Saved {out_path} ({size_mb:.1f} MB)")
 

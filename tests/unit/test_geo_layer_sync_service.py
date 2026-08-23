@@ -250,9 +250,11 @@ async def test_regenerate_removes_raw_tmp_on_success(
     assert not raw_tmp.exists()
 
 
-async def test_regenerate_removes_raw_tmp_on_processor_failure(
+async def test_regenerate_skips_layer_and_removes_raw_tmp_on_simplify_failure(
     service, mock_settings, mock_processor, tmp_path
 ):
+    # BUG-03: a per-layer failure must NOT propagate (aborting startup); it is
+    # logged and skipped, and raw_tmp is still cleaned up.
     raw_tmp = tmp_path / "pais_raw_tmp.geojson"
     layer = {
         "simplified_stem": "pais_simple",
@@ -269,7 +271,59 @@ async def test_regenerate_removes_raw_tmp_on_processor_failure(
     mock_processor.simplify.side_effect = RuntimeError("simplify failed")
     service._needs_regen = [(layer, [(1, 0.001)])]
 
-    with pytest.raises(RuntimeError, match="simplify failed"):
-        await service.regenerate()
+    await service.regenerate()  # does not raise
 
     assert not raw_tmp.exists()
+    service.logger.error.assert_called()
+
+
+async def test_regenerate_retries_download_then_succeeds(
+    service, mock_settings, mock_processor, tmp_path
+):
+    # BUG-03: a transient download failure is retried with backoff.
+    service._RETRY_BACKOFF_BASE = 0  # no real sleeps in tests
+    layer = {
+        "simplified_stem": "pais_simple",
+        "url_attr": "country_geojson_url",
+        "raw_tmp": "pais_raw_tmp.geojson",
+    }
+    mock_settings.country_geojson_url = "http://example.com/country.geojson"
+    mock_settings.s3_bucket_name = ""
+
+    attempts = {"n": 0}
+
+    async def flaky_download(url, path):
+        attempts["n"] += 1
+        if attempts["n"] == 1:
+            raise RuntimeError("network blip")
+        Path(path).touch()
+
+    mock_processor.download.side_effect = flaky_download
+    service._needs_regen = [(layer, [(1, 0.001)])]
+
+    await service.regenerate()
+
+    assert attempts["n"] == 2  # failed once, succeeded on retry
+    mock_processor.simplify.assert_awaited()  # proceeded past the download
+
+
+async def test_regenerate_persistent_download_failure_is_non_fatal(
+    service, mock_settings, mock_processor, tmp_path
+):
+    # BUG-03: after exhausting retries the layer is skipped, not fatal.
+    service._RETRY_BACKOFF_BASE = 0
+    layer = {
+        "simplified_stem": "pais_simple",
+        "url_attr": "country_geojson_url",
+        "raw_tmp": "pais_raw_tmp.geojson",
+    }
+    mock_settings.country_geojson_url = "http://example.com/country.geojson"
+    mock_settings.s3_bucket_name = ""
+    mock_processor.download.side_effect = RuntimeError("IGN unreachable")
+    service._needs_regen = [(layer, [(1, 0.001)])]
+
+    await service.regenerate()  # does not raise
+
+    assert mock_processor.download.await_count == service._MAX_RETRIES
+    mock_processor.simplify.assert_not_awaited()
+    service.logger.error.assert_called()

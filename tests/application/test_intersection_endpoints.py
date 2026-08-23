@@ -104,18 +104,13 @@ def test_intersect_country_accepts_feature_collection(app_client, mock_service):
     assert called_geometry == _VALID_POLYGON
 
 
-def test_intersect_country_feature_collection_with_multiple_features_uses_first(
-    app_client, mock_service
-):
-    mock_service.intersect_country.return_value = {
-        "type": "FeatureCollection",
-        "features": [],
-    }
+def test_intersect_country_multiple_features_rejected(app_client, mock_service):
+    # BUG-06: a multi-feature collection is rejected with 400, not silently reduced
+    # to its first feature.
+    response = app_client.post("/intersect/country", json=_TWO_FEATURE_COLLECTION)
 
-    app_client.post("/intersect/country", json=_TWO_FEATURE_COLLECTION)
-
-    called_geometry = mock_service.intersect_country.call_args.args[0]
-    assert called_geometry == _VALID_POLYGON
+    assert response.status_code == 400
+    mock_service.intersect_country.assert_not_called()
 
 
 def test_intersect_country_default_level_is_five(app_client, mock_service):

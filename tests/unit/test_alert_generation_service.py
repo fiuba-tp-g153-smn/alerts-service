@@ -15,12 +15,23 @@ _POLY = Polygon([(-58.5, -34.6), (-58.4, -34.6), (-58.4, -34.5), (-58.5, -34.6)]
 
 @pytest.fixture(autouse=True)
 def _reset_merc_caches():
-    """Mercator projection caches are module globals — reset around each test."""
-    svc_mod._DEPT_INDEX_MERC_CACHE = None
-    svc_mod._PROV_GEOMS_MERC_CACHE = None
+    """Projection/serialization caches are module globals — reset around each test."""
+    for _name in (
+        "_DEPT_INDEX_MERC_CACHE",
+        "_PROV_GEOMS_MERC_CACHE",
+        "_DEPT_INDEX_SERIALIZED_CACHE",
+        "_PROV_GEOMS_SERIALIZED_CACHE",
+    ):
+        setattr(svc_mod, _name, None)
     yield
-    svc_mod._DEPT_INDEX_MERC_CACHE = None
-    svc_mod._PROV_GEOMS_MERC_CACHE = None
+    for _name in (
+        "_DEPT_INDEX_MERC_CACHE",
+        "_PROV_GEOMS_MERC_CACHE",
+        "_DEPT_INDEX_SERIALIZED_CACHE",
+        "_PROV_GEOMS_SERIALIZED_CACHE",
+    ):
+        setattr(svc_mod, _name, None)
+
 
 GEOMETRY = {
     "type": "Polygon",
@@ -134,6 +145,56 @@ async def test_generate_alert_raises_when_area_too_large(service):
     service.mysql_repo.insert_alert.assert_not_called()
 
 
+def _stub_worker_with_real_gifs(service, tmp_path):
+    """Point the render worker at two real files so cleanup can be asserted."""
+    gif_area = tmp_path / "zoom_alerta.gif"
+    gif_gral = tmp_path / "gral_alerta.gif"
+    gif_area.write_bytes(b"gif")
+    gif_gral.write_bytes(b"gif")
+    service._run_visualization_worker = AsyncMock(
+        return_value={
+            "status": "success",
+            "gif_area": str(gif_area),
+            "gif_gral": str(gif_gral),
+        }
+    )
+    return gif_area, gif_gral
+
+
+async def test_generate_alert_removes_gifs_when_area_too_large(service, tmp_path):
+    # BUG-02: GIFs rendered before validation must be cleaned up on AreaTooLargeError.
+    gif_area, gif_gral = _stub_worker_with_real_gifs(service, tmp_path)
+    service.mysql_repo.get_area_max_length.return_value = 5
+
+    with pytest.raises(AreaTooLargeError):
+        await service.generate_alert(GEOMETRY, phenomenon_code=10)
+
+    assert not gif_area.exists()
+    assert not gif_gral.exists()
+
+
+async def test_generate_alert_removes_gifs_when_insert_fails(service, tmp_path):
+    # BUG-02: an insert failure after render must not orphan the GIFs either.
+    gif_area, gif_gral = _stub_worker_with_real_gifs(service, tmp_path)
+    service.mysql_repo.insert_alert.side_effect = RuntimeError("db down")
+
+    with pytest.raises(RuntimeError, match="db down"):
+        await service.generate_alert(GEOMETRY, phenomenon_code=10)
+
+    assert not gif_area.exists()
+    assert not gif_gral.exists()
+
+
+async def test_generate_alert_keeps_gifs_on_success(service, tmp_path):
+    # Regression: the cleanup must NOT delete GIFs on the success path.
+    gif_area, gif_gral = _stub_worker_with_real_gifs(service, tmp_path)
+
+    await service.generate_alert(GEOMETRY, phenomenon_code=10)
+
+    assert gif_area.exists()
+    assert gif_gral.exists()
+
+
 def test_project_index_to_mercator_keeps_bbox_and_uses_metres():
     bbox = _POLY.bounds
     out = AlertGenerationService._project_index_to_mercator([(bbox, _POLY)])
@@ -152,6 +213,54 @@ async def test_get_dept_index_merc_projects_once_and_caches():
     second = await AlertGenerationService._get_dept_index_merc([])
     assert first is second
     assert len(first) == 1
+
+
+async def test_get_dept_index_serialized_computes_once_and_caches():
+    # PERF-01: WKB-hex serialization is computed once, then reused across requests.
+    merc = [(_POLY.bounds, _POLY)]
+    first = await AlertGenerationService._get_dept_index_serialized(merc)
+    second = await AlertGenerationService._get_dept_index_serialized([])
+    assert first is second
+    assert first[0]["bbox"] == list(_POLY.bounds)
+    assert isinstance(first[0]["wkb_hex"], str) and first[0]["wkb_hex"]
+
+
+async def test_get_prov_geoms_serialized_computes_once_and_caches():
+    first = await AlertGenerationService._get_prov_geoms_serialized([_POLY])
+    second = await AlertGenerationService._get_prov_geoms_serialized([])
+    assert first is second
+    assert isinstance(first[0], str) and first[0]
+
+
+def test_build_worker_payload_contains_all_worker_fields(service):
+    service.settings.output_dir = "/out"
+    service.settings.alert_cache_dir = "/cache"
+
+    payload = service._build_worker_payload(
+        GEOMETRY,
+        "TEXT",
+        "250101000000",
+        [],
+        [],
+        [{"bbox": [0, 0, 1, 1], "wkb_hex": "00"}],
+        ["00"],
+    )
+
+    import json as _json
+
+    data = _json.loads(payload)
+    assert set(data) == {
+        "geometry_wkb_hex",
+        "phenomenon_text",
+        "timestamp",
+        "affected_departments",
+        "all_departments",
+        "output_dir",
+        "cache_dir",
+        "dept_index_serialized",
+        "prov_geoms_serialized",
+    }
+    assert data["dept_index_serialized"] == [{"bbox": [0, 0, 1, 1], "wkb_hex": "00"}]
 
 
 async def test_prewarm_render_geometry_is_best_effort(service, tmp_path):

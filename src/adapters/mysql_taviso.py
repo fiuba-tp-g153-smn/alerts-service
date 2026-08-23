@@ -1,10 +1,15 @@
 """Read-only MySQL adapter for the external taviso database."""
 
+import queue
 from typing import List, Optional
 
 from mysql.connector import pooling
 
 from ports.taviso_repository import ITavisoReadRepository
+
+# Bounds how long acquiring/establishing a connection may block, so a dead or slow
+# external DB fails fast (on a worker thread) instead of hanging indefinitely.
+_CONNECTION_TIMEOUT_SECONDS = 30
 
 
 class MySQLTavisoReadRepository(ITavisoReadRepository):
@@ -27,6 +32,7 @@ class MySQLTavisoReadRepository(ITavisoReadRepository):
             user=user,
             password=password,
             charset="latin1",
+            connection_timeout=_CONNECTION_TIMEOUT_SECONDS,
         )
 
     def get_active_alerts(self, since_id: Optional[int] = None) -> List[dict]:
@@ -58,12 +64,10 @@ class MySQLTavisoReadRepository(ITavisoReadRepository):
         cursor = None
         try:
             cursor = conn.cursor()
-            cursor.execute(
-                """
+            cursor.execute("""
                 SELECT MAX(IdAlerta) FROM taviso
                 WHERE FechaHora <= NOW() AND FechaFin > NOW()
-                """
-            )
+                """)
             row = cursor.fetchone()
             return row[0] if row else None
         finally:
@@ -72,11 +76,20 @@ class MySQLTavisoReadRepository(ITavisoReadRepository):
             conn.close()
 
     def close(self) -> None:
-        """Close all connections in the pool."""
-        # MySQLConnectionPool doesn't have a close_all; drain active connections
-        try:
-            while True:
-                conn = self.pool.get_connection()
-                conn.close()
-        except Exception:  # pylint: disable=broad-exception-caught
-            pass  # Pool exhausted — all connections closed
+        """Close every pooled connection by draining the pool's internal queue.
+
+        A pooled connection's own ``close()`` only returns it to the pool, so the
+        old ``get_connection()``/``close()`` loop never closed sockets and could
+        spin. Drain the underlying queue and disconnect each raw connection instead
+        — bounded by ``pool_size``, with no timeout wait.
+        """
+        cnx_queue = self.pool._cnx_queue  # pylint: disable=protected-access
+        while True:
+            try:
+                cnx = cnx_queue.get(block=False)
+            except queue.Empty:
+                break
+            try:
+                cnx.close()  # raw MySQLConnection.close() actually disconnects
+            except Exception:  # pylint: disable=broad-exception-caught
+                pass

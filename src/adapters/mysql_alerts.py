@@ -1,5 +1,6 @@
 """MySQL adapter for alert database operations."""
 
+import queue
 from typing import Dict, List, Optional, Tuple
 
 from mysql.connector import pooling
@@ -65,13 +66,11 @@ class MySQLAlertsRepository(IMySQLRepository):
         cursor = None
         try:
             cursor = conn.cursor(dictionary=True)
-            cursor.execute(
-                """
+            cursor.execute("""
                 SELECT d.id_provincia, d.id_localidad, d.nom_departamento,
                        d.latitud, d.longitud, pr.provincia
                 FROM departamentos d JOIN provincia pr ON d.id_provincia = pr.id_provincia
-            """
-            )
+            """)
             rows = cursor.fetchall()
             for row in rows:
                 row["latitud"] = float(row["latitud"])
@@ -192,11 +191,20 @@ class MySQLAlertsRepository(IMySQLRepository):
         return PHENOMENA.copy()
 
     def close(self) -> None:
-        """Close all connections in the pool."""
-        # MySQLConnectionPool doesn't have a close_all; drain active connections
-        try:
-            while True:
-                conn = self.pool.get_connection()
-                conn.close()
-        except Exception:  # pylint: disable=broad-exception-caught
-            pass  # Pool exhausted — all connections closed
+        """Close every pooled connection by draining the pool's internal queue.
+
+        A pooled connection's own ``close()`` only returns it to the pool, so the
+        old ``get_connection()``/``close()`` loop never closed sockets and could
+        spin. Drain the underlying queue and disconnect each raw connection instead
+        — bounded by ``pool_size``, with no timeout wait.
+        """
+        cnx_queue = self.pool._cnx_queue  # pylint: disable=protected-access
+        while True:
+            try:
+                cnx = cnx_queue.get(block=False)
+            except queue.Empty:
+                break
+            try:
+                cnx.close()  # raw MySQLConnection.close() actually disconnects
+            except Exception:  # pylint: disable=broad-exception-caught
+                pass
