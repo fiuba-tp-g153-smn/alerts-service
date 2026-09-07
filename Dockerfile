@@ -7,6 +7,7 @@ WORKDIR /app
 
 # Install system dependencies for matplotlib/cartopy/cairosvg
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    -o Acquire::Retries=5 -o Acquire::http::Timeout=30 \
     gcc g++ \
     libgeos-dev libproj-dev proj-data proj-bin \
     libgdal-dev gdal-bin \
@@ -33,6 +34,7 @@ WORKDIR /app
 
 # Install runtime dependencies for matplotlib/cartopy/cairosvg
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    -o Acquire::Retries=5 -o Acquire::http::Timeout=30 \
     libgeos-c1t64 libproj25 \
     libgdal36 \
     libspatialindex-c8 \
