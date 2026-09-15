@@ -9,16 +9,21 @@
 ## Commands
 
 ```bash
-make install     # Install deps (Poetry 2.0+)
-make dev         # Docker dev (hot reload)
-make test        # Tests in Docker
+make up          # Docker dev, hot reload (docker-compose-dev.yaml)
+make down        # Stop dev and prod containers
+make clean       # Stop and drop volumes
+make prod        # Production compose (docker-compose.yaml)
+make test        # Tests in Docker (Dockerfile.run_test, the only image with dev deps)
 make precommit   # Pre-commit hooks (pylint, mypy, black)
-make local       # Run without Docker
 
-# Single test file/function:
-docker compose -f docker-compose.yaml run --rm alerts-service poetry run pytest tests/unit/test_geo_utils.py -v
-docker compose -f docker-compose.yaml run --rm alerts-service poetry run pytest tests/unit/test_geo_utils.py::test_function_name -v
+# Single test file/function — the dev and prod images install `--without dev`,
+# so pytest only exists in the test image:
+docker build . -f Dockerfile.run_test -t alerts-service-test
+docker run --rm alerts-service-test poetry run pytest tests/unit/test_geo_utils.py -v
+docker run --rm alerts-service-test poetry run pytest tests/unit/test_geo_utils.py::test_function_name -v
 ```
+
+`make test-api` exists but runs `tests/test_alerts_api.py`, which is not in the repo.
 
 ## Architecture
 
@@ -27,7 +32,7 @@ FastAPI geospatial intersection service (Python). Given a GeoJSON polygon, compu
 ### Request Flow
 
 ```
-POST /intersect/country or /intersect/departments  (detail_level 1-5)
+POST /intersect/country (detail_level 1-5, default 5) or /intersect/departments
   → Controller (controller/intersections.py)
   → GeoIntersectionService (services/geo_intersection_service.py)
       └─ cached GeoDataFrame (per detail_level) → shapely intersection → GeoJSON
@@ -38,14 +43,14 @@ POST /intersect/country or /intersect/departments  (detail_level 1-5)
 
 On startup (`main.py` lifespan), the scheduler (`scheduler/__init__.py`) runs S3 reconciliation: compares local `data/` files against S3 by date-stamp, downloads missing layers or re-generates from IGN. APScheduler cron (default: weekly Sunday 3 AM UTC) refreshes layers — download → simplify (one GeoJSON per detail_level) → upload to S3. History saved to `data/history.db` (SQLite).
 
-### Key Design Decisions
+### Design Decisions
 
 - **Hexagonal architecture**: interfaces in `ports/`, implementations in `adapters/`, business logic in `services/`.
 - **Pre-simplified layers**: each `detail_level` (1-5, plus internal 7 for alerts) is a date-stamped GeoJSON simplified at a fixed tolerance, loaded into an in-memory GeoDataFrame cache. Higher `detail_level` = more detail (lower tolerance).
 - **Versioned files**: date-stamped per-level layers (e.g., `pais_simple_L5_T0p01_20260314.geojson`); glob patterns locate the latest version.
 - **DI via container**: `container.py` provides singletons and per-request services via FastAPI `Depends`.
 
-### Key Source Files
+### Source Files
 
 | File | Role |
 |---|---|
@@ -65,15 +70,18 @@ Copy `.env.example` to `.env`. Key variables:
 | Variable | Default | Notes |
 |---|---|---|
 | `APP_ENV` | `development` | `production` enables NewRelic JSON logging |
-| `detail_levels` (settings.json) | see file | Per-level simplify tolerance; API exposes 1-5, level 7 is internal (alerts) |
-| `alert_detail_level` (settings.json) | `7` | detail_level used for alert generation (internal, not API-selectable) |
-| `layer_update_cron` (settings.json) | `0 3 * * 0` | Cron for layer refresh |
+| `detail_level_tolerances` (settings.json) | see file | Per-level simplify tolerance in degrees; API exposes 1-5, level 7 is internal (alerts) |
+| `alerts.detail_level` (settings.json) | `7` | detail_level used for alert generation (internal, not API-selectable) |
+| `layer.update_cron` (settings.json) | `0 3 * * 0` | Cron for layer refresh (scheduler timezone is UTC) |
+| `departments_simplify_tolerance` / `ign_simplify_tolerance` (settings.json) | `0.005` | Fixed tolerance for the departments layer and the IGN base-map geometries |
+| `APP_HOST_PORT` | `6007` (`.env.example`) | Host port; both compose files map it to `8080` in the container |
+| `MANAGE_DB_SCHEMAS` | `true` in dev | Gates every Alembic migration; unset in production so `alembic upgrade head` is a no-op |
 | `S3_ENDPOINT` / `S3_BUCKET_NAME` | (empty) | Required for S3 backup |
 | `COUNTRY_GEOJSON_URL` / `DEPARTMENTS_GEOJSON_URL` | IGN WFS URLs | Override data source |
 
 New config → add to settings with a sensible default. Don't scatter `os.getenv()` — centralize in config module.
 
-API docs at `http://localhost:8080/docs` when running.
+API docs at `http://localhost:6007/docs` when running under compose (`APP_HOST_PORT` on the host, `8080` inside the container).
 
 ## Engineering Rules
 

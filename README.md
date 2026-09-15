@@ -25,22 +25,13 @@ Servicio de intersección geográfica para el sistema de alertas meteorológicas
 
 ## Features
 
-- **Geographic Intersection API**: REST endpoints para operaciones de intersección geográfica
-  - `POST /intersect-country`: Intersección con territorio argentino
-  - `POST /intersect-departments`: Intersección con departamentos provinciales
-- **Dual Quality Modes**:
-  - **Simplified** (1% tolerance): Respuestas rápidas (~0.3s), calidad excelente para visualización web/móvil
-  - **Full Resolution**: Máximo detalle para análisis de precisión (~10s)
-- **Automatic Data Management**:
-  - Descarga automática de capas geográficas del IGN al inicio
-  - Simplificación inteligente de geometrías con tolerancia configurable
-  - Caché persistente para optimizar reinicios
-- **Production Ready**:
-  - Health checks integrados
-  - Logging estructurado
-  - Documentación automática con Swagger/OpenAPI
-  - Actualización mensual automática de datos (cron)
-- **Dockerized**: Entorno completamente contenerizado para desarrollo y producción
+- **Intersección geográfica**: `POST /intersect/country` (territorio argentino, con nivel de detalle 1-5) y `POST /intersect/departments` (departamentos que tocan el polígono).
+- **Generación de avisos**: `POST /alerts` encola el render del GIF del aviso y devuelve `202` con un `job_id`; el resultado se consulta en `GET /alerts/jobs/{job_id}` y aparece en `GET /alerts/pending`.
+- **Lectura de avisos vigentes**: `GET /alerts` y `GET /alerts/pending` leen las tablas MySQL `taviso` (externa, solo lectura) y `taviso_temporal`, con `ETag` / `If-None-Match` para respuestas `304`.
+- **Capas pre-simplificadas**: una capa por nivel de detalle, generada con la tolerancia fijada en `settings.json` (`detail_level_tolerances`) y cacheada en memoria.
+- **Gestión de capas**: al iniciar se reconcilian los archivos locales de `data/` contra S3 y se descarga del IGN lo que falte; un cron de APScheduler (`0 3 * * 0`, domingos 3 AM) regenera y vuelve a subir las capas.
+- **Métricas**: `GET /metrics/*` expone agregados de los jobs de generación y del estado del procesador, persistidos en SQLite.
+- **Dockerizado**: `docker-compose-dev.yaml` (hot-reload) y `docker-compose.yaml` (producción), ambos con el servicio MySQL incluido.
 
 ## Dependencies
 
@@ -50,15 +41,15 @@ Dependencias necesarias:
 
 - **Docker**: para ejecutar el proyecto en un entorno contenerizado
 - **Make**: para simplificar y automatizar comandos
-- **Python v3.10+**: solo si decides ejecutar la aplicación de forma nativa (sin Docker)
+- **Python v3.13+**: solo si decides ejecutar la aplicación de forma nativa (sin Docker). `pyproject.toml` declara `requires-python = ">=3.13,<4.0"`
 
 ## Setup for Development
 
 1. Clona el repositorio:
 
    ```bash
-   git clone https://github.com/fiuba-tp-g153-smn/mapasmn.git
-   cd mapasmn/alerts-service
+   git clone https://github.com/fiuba-tp-g153-smn/alerts-service.git
+   cd alerts-service
    ```
 
 2. Copia el archivo de configuración de ejemplo:
@@ -67,91 +58,95 @@ Dependencias necesarias:
    cp .env.example .env
    ```
 
-   Edita `.env` para configurar variables de entorno (tolerancia de simplificación, puerto, logs).
+   Edita `.env` para configurar variables de entorno (puerto, logs, credenciales de MySQL y S3).
 
-3. Para desarrollo local:
-
-   **Con Docker (recomendado):**
+3. Levanta el entorno de desarrollo:
 
    ```bash
-   make dev
+   make up
    ```
 
-   La aplicación estará disponible en <http://localhost:8080>
-
-   **Sin Docker:**
-
-   ```bash
-   # Crear entorno virtual
-   python -m venv .venv
-   source .venv/bin/activate  # En Windows: .venv\Scripts\activate
-   
-   # Instalar dependencias
-   make install
-   
-   # Ejecutar servicio
-   make local
-   ```
-
-   La aplicación estará disponible en <http://localhost:8080>
+   La aplicación queda expuesta en el puerto `APP_HOST_PORT` del host (`6007` en `.env.example`), mapeado al `8080` del contenedor: <http://localhost:6007/docs>
 
 ## Configuration
 
+La configuración se reparte entre `.env` (variables de entorno, credenciales y rutas) y `settings.json` (montado en `/config/settings.json`, para valores que se cambian sin rebuild). Los defaults viven en `src/settings.py`.
+
 ### Variables de Entorno
 
-Edita `.env` o configura variables de entorno:
-
 ```bash
-# Puerto del servicio
-APP_HOST_PORT=8080
+# Puerto del servicio en el host (el contenedor siempre escucha en 8080)
+APP_HOST_PORT=6007
 
-# Entorno de ejecución
+# Entorno de ejecución (production activa el logging JSON de NewRelic)
 APP_ENV=development
 
 # Nivel de logging
 LOG_LEVEL=INFO
 
-# Tolerancia de simplificación de geometrías (0.001 - 0.1)
-# 0.001 (0.1%): Máximo detalle, más lento
-# 0.01  (1%):   Excelente calidad, buen rendimiento ⭐ (default)
-# 0.05  (5%):   Buena calidad, más rápido
-# 0.1   (10%):  Menor detalle, máxima velocidad
-SIMPLIFY_TOLERANCE=0.01
+# Ruta al archivo settings.json dentro del contenedor
+SETTINGS_FILE=/config/settings.json
 ```
+
+`.env.example` incluye además las credenciales de S3 (`S3_ENDPOINT`, `S3_ACCESS_KEY`, `S3_SECRET_KEY`, `S3_BUCKET_NAME`, `S3_SECURE`), las de MySQL (base propia y `taviso` externa de solo lectura), `MANAGE_DB_SCHEMAS` —que habilita o inhibe todas las migraciones de Alembic— y los directorios `OUTPUT_DIR` / `ALERT_CACHE_DIR`. Las URLs WFS del IGN (`COUNTRY_GEOJSON_URL`, `DEPARTMENTS_GEOJSON_URL`, `PROVINCES_GEOJSON_URL`) tienen default en el código y solo se declaran para sobrescribirlas.
+
+### Tolerancias de simplificación
+
+`settings.json` define la tolerancia de simplificación por nivel de detalle, en grados. Menor tolerancia significa más detalle y archivos más grandes:
+
+| `detail_level` | Tolerancia |
+| -------------- | ---------- |
+| 1              | 0.2        |
+| 2              | 0.1        |
+| 3              | 0.05       |
+| 4              | 0.025      |
+| 5              | 0.01       |
+| 7              | 0.005      |
+
+Los niveles 1 a 5 son los que acepta la API; el 7 es interno y lo usa la generación de avisos (`alerts.detail_level`). Los departamentos y las capas base del IGN se simplifican con una tolerancia fija de `0.005` (`departments_simplify_tolerance`, `ign_simplify_tolerance`).
 
 ### Geographic Data
 
 El servicio gestiona automáticamente los datos geográficos:
 
-1. **Al iniciar**: Descarga capas del IGN si no existen localmente
-2. **Simplificación**: Genera versiones optimizadas según `SIMPLIFY_TOLERANCE`
-3. **Actualización**: Cron job mensual (día 1 a las 3 AM) actualiza los datos
-4. **Caché**: Almacena en `./data/` para optimizar reinicios
+1. **Al iniciar**: compara los archivos de `data/` contra S3 por fecha, descarga lo que falte y regenera desde el IGN lo que no esté en ninguno de los dos
+2. **Simplificación**: genera un GeoJSON por nivel de detalle, fechado y con la tolerancia en el nombre (por ejemplo `pais_simple_L5_T0p01_20260314.geojson`)
+3. **Actualización**: cron de APScheduler, por defecto `0 3 * * 0` (domingos a las 3 AM), configurable en `settings.json` (`layer.update_cron`)
+4. **Caché**: los archivos quedan en `./data/` y las capas cargadas se cachean en memoria (`layer.cache_ttl_minutes`, 30 min); el historial de refrescos se guarda en SQLite
 
 **Capas utilizadas:**
 
 - `ign:pais` - Límites del territorio argentino
 - `ign:departamento` - División departamental (todos los departamentos de Argentina)
-
-**Archivos generados:**
-
-- `pais.geojson` (108 MB) → `pais_simple.geojson` (554 KB)
-- `departamentos.geojson` (134 MB) → `departamentos_simple.geojson` (1.2 MB)
+- `ign:provincia` - División provincial (usada solo para el render de los avisos)
 
 ## API Documentation
 
-### Endpoints Principales
+### Endpoints
 
-**Health Check**
-
-```bash
-GET /health
-```
+| Método | Ruta | Descripción |
+| ------ | ---- | ----------- |
+| `GET`  | `/` | Estado del servicio |
+| `GET`  | `/health` | Health check (lo usa el `healthcheck` de Docker) |
+| `POST` | `/intersect/country` | Intersección con el territorio argentino |
+| `POST` | `/intersect/departments` | Departamentos que intersecan el polígono |
+| `GET`  | `/intersect/layer-refresh-history` | Últimas corridas del refresco de capas (`limit`, 1-100, default 20) |
+| `POST` | `/alerts` | Encola la generación de un aviso; devuelve `202` con `job_id` |
+| `GET`  | `/alerts` | Avisos vigentes de la tabla externa `taviso` |
+| `GET`  | `/alerts/pending` | Avisos pendientes de `taviso_temporal` |
+| `GET`  | `/alerts/jobs/{job_id}` | Estado del job: `queued`, `processing`, `done` o `failed` |
+| `GET`  | `/alerts/phenomena` | Fenómenos meteorológicos disponibles |
+| `GET`  | `/alerts/limits` | Máximo de vértices admitido en el polígono |
+| `GET`  | `/metrics/summary` | KPIs de generación de avisos en una ventana de horas |
+| `GET`  | `/metrics/jobs` | Jobs terminados recientes |
+| `GET`  | `/metrics/jobs/history` | Series de resultados y duración por bucket (`hour` o `day`) |
+| `GET`  | `/metrics/processor/history` | Series de cola y workers del procesador |
+| `GET`  | `/metrics/layers` | Últimas corridas del refresco de capas |
 
 **Intersección con País**
 
 ```bash
-POST /intersect-country?use_simplified=true
+POST /intersect/country?detail_level=5
 Content-Type: application/json
 
 {
@@ -163,7 +158,7 @@ Content-Type: application/json
 **Intersección con Departamentos**
 
 ```bash
-POST /intersect-departments?use_simplified=true
+POST /intersect/departments
 Content-Type: application/json
 
 {
@@ -174,10 +169,9 @@ Content-Type: application/json
 
 ### Parámetros de Query
 
-Ambos endpoints aceptan el parámetro `use_simplified`:
+`POST /intersect/country` acepta `detail_level`, un entero entre 1 y 5 (default `5`): a mayor nivel, menor tolerancia de simplificación y más detalle. Las tolerancias por nivel están en la tabla de [Configuration](#configuration).
 
-- `true` (default): Usa geometrías simplificadas (~0.3s, 25-56x más rápido)
-- `false`: Usa geometrías completas (~10s, máximo detalle)
+`POST /intersect/departments` no toma parámetros: siempre usa la capa de departamentos simplificada con `departments_simplify_tolerance` (0.005).
 
 ### Formatos de Entrada
 
@@ -190,76 +184,42 @@ Los endpoints aceptan GeoJSON en cualquiera de estos formatos:
 ### Ejemplos de Uso
 
 ```bash
-# Intersección con país (simplificada)
-curl -X POST "http://localhost:8080/intersect-country?use_simplified=true" \
+# Intersección con país, máximo nivel de detalle expuesto por la API
+curl -X POST "http://localhost:6007/intersect/country?detail_level=5" \
   -H "Content-Type: application/json" \
   -d @polygon.json
 
-# Intersección con departamentos (completa)
-curl -X POST "http://localhost:8080/intersect-departments?use_simplified=false" \
+# Intersección con departamentos
+curl -X POST "http://localhost:6007/intersect/departments" \
   -H "Content-Type: application/json" \
   -d '{"type":"Polygon","coordinates":[[[-55.6,-27.1],[-54.8,-26.6],[-53.9,-26.3],[-55.6,-27.1]]]}'
 ```
 
 ### Documentación Interactiva
 
-- **Swagger UI**: <http://localhost:8080/docs>
-- **ReDoc**: <http://localhost:8080/redoc>
+- **Swagger UI**: <http://localhost:6007/docs>
+- **ReDoc**: <http://localhost:6007/redoc>
 
 ## Running Tests
-
-### Unit Tests
 
 ```bash
 make test
 ```
 
-Ejecuta pytest con coverage. Resultados en `./reports/`.
+Construye la imagen `Dockerfile.run_test` y corre pytest con coverage. Los reportes quedan en `./reports/`.
 
-### API Integration Tests
-
-```bash
-# Prerequisito: servicio debe estar corriendo
-make dev
-
-# En otra terminal, ejecutar tests de integración
-make test-api
-```
-
-Los tests de integración:
-
-- Prueban ambos endpoints con versiones simplificada y completa
-- Miden tiempos de respuesta
-- Generan archivos GeoJSON de resultado en `tests/`
-
-**Archivos generados:**
-
-- `tests/country_simplified.json` - Intersección con país (simplificado)
-- `tests/country_full.json` - Intersección con país (completo)
-- `tests/departments_simplified.geojson` - Departamentos (simplificado) ⭐
-- `tests/departments_full.geojson` - Departamentos (completo) ⭐
-
-Ver [tests/README.md](tests/README.md) para más detalles.
+Los tests se dividen en `tests/unit/` (sin red ni Docker) y `tests/application/` (contra la app FastAPI).
 
 ## Makefile Commands
 
 ```bash
-# Development
-make install          # Instalar dependencias con Poetry
-make dev              # Iniciar en modo desarrollo (con logs)
-make dev-detached     # Iniciar en background
-make logs             # Ver logs del contenedor
-make stop             # Detener contenedor
-make clean            # Detener y eliminar volúmenes
-
-# Production
-make prod             # Iniciar en modo producción
-make prod-stop        # Detener producción
-
-# Local (sin Docker)
-make local            # Ejecutar con uvicorn localmente
-
-# Testing
-make test             # Tests unitarios con pytest
-make test-api         # Tests de integración API
+make up          # Entorno de desarrollo con hot-reload (docker-compose-dev.yaml)
+make down        # Detener los contenedores de dev y de producción
+make clean       # Detener y eliminar volúmenes
+make prod        # Entorno de producción (docker-compose.yaml)
+make test        # Tests con pytest y coverage dentro de Docker
+make test-api    # Tests de integración contra el servicio corriendo (ver nota abajo)
+make precommit   # pre-commit sobre todos los archivos (black, pylint, mypy)
 ```
+
+`make test-api` ejecuta `tests/test_alerts_api.py`, que no está en el repositorio: hoy el target falla.
