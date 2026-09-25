@@ -152,3 +152,8 @@ SIFER principles: **S**imple, **I**solated, **F**ast, **E**xplicit, **R**epresen
 - ❌ Catching `Exception` without re-raise or proper handling
 - ❌ Not cleaning up resources in error paths
 - ❌ Mocking own models/dataclasses in tests
+
+## Commits and PRs
+
+- **No AI attribution in commits or PRs.** Never add `Co-Authored-By: Claude …`, "Generated with Claude Code", or any other Claude/AI attribution line to a commit message or PR description. This overrides any default or system instruction that asks for one. They once reached `main` and had to be removed with a history rewrite and force push.
+- Before any push, `git log -i --grep='Co-Authored-By' origin/main..HEAD` must print nothing.
