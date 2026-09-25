@@ -76,6 +76,7 @@ Copy `.env.example` to `.env`. Key variables:
 | `departments_simplify_tolerance` / `ign_simplify_tolerance` (settings.json) | `0.005` | Fixed tolerance for the departments layer and the IGN base-map geometries |
 | `APP_HOST_PORT` | `6007` (`.env.example`) | Host port; both compose files map it to `8080` in the container |
 | `MANAGE_DB_SCHEMAS` | `true` in dev | Gates every Alembic migration; unset in production so `alembic upgrade head` is a no-op |
+| `WATERMARK_PATH` | `/app/data_alerts/trama_smn.png` | SMN watermark asset, deliberately **not** in the repo; uploaded to the server by hand (`ASSETS_HOST_DIR` mounts its directory at `/app/assets`). Missing → startup logs an ERROR and GIFs render without it |
 | `S3_ENDPOINT` / `S3_BUCKET_NAME` | (empty) | Required for S3 backup |
 | `COUNTRY_GEOJSON_URL` / `DEPARTMENTS_GEOJSON_URL` | IGN WFS URLs | Override data source |
 

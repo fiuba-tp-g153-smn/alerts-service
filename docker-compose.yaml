@@ -61,6 +61,10 @@ services:
     volumes:
       - alerts_service_data:/app/data
       - alerts_output:/app/output/alerts
+      # SMN watermark: not in the repo, uploaded to the server by hand. A
+      # directory is mounted rather than the file itself, because Docker
+      # silently creates a directory in place of a missing bind-mounted file.
+      - ${ASSETS_HOST_DIR:-./data_alerts}:/app/assets:ro
     environment:
       - LOG_LEVEL=${LOG_LEVEL}
       - APP_ENV=${APP_ENV}
@@ -84,6 +88,7 @@ services:
       - MYSQL_TAVISO_PASSWORD=${MYSQL_TAVISO_PASSWORD}
       - OUTPUT_DIR=${OUTPUT_DIR}
       - ALERT_CACHE_DIR=${ALERT_CACHE_DIR}
+      - WATERMARK_PATH=${WATERMARK_PATH}
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')"]
       interval: 30s

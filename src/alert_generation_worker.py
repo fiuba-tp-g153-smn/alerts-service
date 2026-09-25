@@ -13,7 +13,8 @@ Input JSON:
     "affected_departments": [{...}],
     "all_departments": [{...}],
     "output_dir": "/app/output/alerts",
-    "cache_dir": "/app/cache"
+    "cache_dir": "/app/cache",
+    "watermark_path": "/app/data_alerts/trama_smn.png"
 }
 
 Output JSON:
@@ -57,7 +58,13 @@ import matplotlib.pyplot as plt  # pylint: disable=wrong-import-position,import-
 FONT_BLACK = FontProperties(fname="/app/data_alerts/EncodeSans-Black.ttf")
 FONT_MEDIUM = FontProperties(fname="/app/data_alerts/EncodeSans-Medium.ttf")
 FONT_SEMIBOLD = FontProperties(fname="/app/data_alerts/EncodeSans-SemiBold.ttf")
-WATERMARK_PATH = "/app/data_alerts/logo_smn.png"
+DEFAULT_WATERMARK_PATH = "/app/data_alerts/trama_smn.png"
+# The pattern PNG already carries its intended opacity in its alpha channel.
+WATERMARK_ALPHA = 1.0
+# The pattern is a portrait strip, too narrow to cover the canvas on its own.
+# Two side-by-side copies span it at native proportions. It is never tiled
+# vertically: the pattern has blank top/bottom rows that would show as seams.
+WATERMARK_TILE_X = 2
 HEADER_LOGO_PATH = "/app/data_alerts/logo_smn_header.png"
 INSET_SVG_PATH = "/app/data_alerts/cuarteron.svg"
 # Pre-rasterised corner-inset PNG, built by scheduler._build_cuarteron_cache_sync
@@ -493,28 +500,35 @@ def _load_ign_layers(cache_path: str) -> dict:
     return layers
 
 
-def _add_watermark(fig):
-    """Add a low-opacity watermark over the map area (not header/phenom)."""
-    if os.path.exists(WATERMARK_PATH):
-        img = plt.imread(WATERMARK_PATH)
-        # Large watermark: almost touches the bottom edge of the phenomenon
-        # (MAP_TOP), never overlaps it. Logo is ~square; adjust width based on
-        # figure aspect ratio.
-        wm_y = 0.02
-        gap = 0.015
-        wm_h = MAP_TOP - wm_y - gap  # height = almost the whole map area
-        fw_in, fh_in = fig.get_size_inches()
-        wm_w = wm_h * (fh_in / fw_in)  # keeps 1:1 visual aspect
-        wm_x = (1.0 - wm_w) / 2.0
-        ax_wm = fig.add_axes([wm_x, wm_y, wm_w, wm_h], facecolor="none")
-        ax_wm.set_zorder(100)
-        ax_wm.axis("off")
-        ax_wm.imshow(img, alpha=0.3, zorder=100)
-    else:
+def _add_watermark(fig, watermark_path: str):
+    """Add the SMN pattern watermark over the map area (not header/phenom).
+
+    The asset is not versioned (it is SMN brand material): in production it is
+    uploaded to the server by hand and located via the WATERMARK_PATH env var,
+    so a missing file is an expected state and only warns.
+    """
+    if not os.path.exists(watermark_path):
         print(
-            f"WARNING: Logo not found at path: {WATERMARK_PATH}",
+            f"WARNING: Watermark not found at path: {watermark_path}",
             file=sys.stderr,
         )
+        return
+
+    img = np.tile(plt.imread(watermark_path), (1, WATERMARK_TILE_X, 1))
+
+    # Large watermark: almost touches the bottom edge of the phenomenon
+    # (MAP_TOP), never overlaps it.
+    wm_y = 0.02
+    gap = 0.015
+    wm_h = MAP_TOP - wm_y - gap  # height = almost the whole map area
+    fw_in, fh_in = fig.get_size_inches()
+    img_aspect = img.shape[1] / img.shape[0]  # width / height, in pixels
+    wm_w = wm_h * (fh_in / fw_in) * img_aspect  # axes box matches image aspect
+    wm_x = (1.0 - wm_w) / 2.0
+    ax_wm = fig.add_axes([wm_x, wm_y, wm_w, wm_h], facecolor="none")
+    ax_wm.set_zorder(100)
+    ax_wm.axis("off")
+    ax_wm.imshow(img, alpha=WATERMARK_ALPHA, zorder=100)
 
 
 def _load_index(path: str) -> list:
@@ -977,6 +991,7 @@ def generate_area_gif(  # pylint: disable=too-many-locals
     all_departments,
     dept_index,
     prov_geoms,
+    watermark_path,
 ):
     """Generate zoomed-in area GIF showing affected region."""
     lats = [c[0] for c in coords]
@@ -1134,7 +1149,7 @@ def generate_area_gif(  # pylint: disable=too-many-locals
             path_effects=[pe.withStroke(linewidth=2, foreground="white")],
         )
 
-    _add_watermark(fig)
+    _add_watermark(fig, watermark_path)
 
     # Corner inset — fixed bottom-right; the extent padding guarantees
     # free space so it doesn't overlap the polygon.
@@ -1156,7 +1171,14 @@ def generate_area_gif(  # pylint: disable=too-many-locals
 
 
 def generate_general_gif(  # pylint: disable=too-many-locals
-    text, coords, timestamp, output_dir, dept_geoms, prov_geoms, all_departments
+    text,
+    coords,
+    timestamp,
+    output_dir,
+    dept_geoms,
+    prov_geoms,
+    all_departments,
+    watermark_path,
 ):
     """Generate country-wide GIF showing full Argentina with polygon."""
     lons = [c[1] for c in coords]
@@ -1249,7 +1271,7 @@ def generate_general_gif(  # pylint: disable=too-many-locals
 
     _draw_places(ax_map, places, dpi=80)
 
-    _add_watermark(fig_final)
+    _add_watermark(fig_final, watermark_path)
 
     # Corner inset — bottom-right over water per template
     # Over the ocean (light blue part) on the south-east edge, not flush with the right margin.
@@ -1287,6 +1309,7 @@ async def main():
         all_departments = payload["all_departments"]
         output_dir = payload["output_dir"]
         cache_dir = payload.get("cache_dir", "/app/cache")
+        watermark_path = payload.get("watermark_path", DEFAULT_WATERMARK_PATH)
 
         # Ensure output directory exists
         os.makedirs(output_dir, exist_ok=True)
@@ -1329,6 +1352,7 @@ async def main():
                 all_departments,
                 dept_index,
                 prov_geoms,
+                watermark_path,
             ),
             asyncio.to_thread(
                 generate_general_gif,
@@ -1339,6 +1363,7 @@ async def main():
                 dept_geoms_all,
                 prov_geoms,
                 all_departments,
+                watermark_path,
             ),
         )
 

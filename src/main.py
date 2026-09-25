@@ -48,6 +48,17 @@ async def lifespan(_app: FastAPI):
 
     scheduler.start()
 
+    # Brand asset deliberately kept out of the repo (uploaded to the server by
+    # hand, located via WATERMARK_PATH). Missing it only costs the watermark, so
+    # startup continues — but say so loudly, since the render subprocess's own
+    # warning goes to its stderr and nobody reads it.
+    if not os.path.exists(settings.watermark_path):
+        logger.error(
+            "Watermark asset missing at %s - alert GIFs will render without it. "
+            "Upload it to the server and check WATERMARK_PATH.",
+            settings.watermark_path,
+        )
+
     # Pre-warm the render geometry (project dept/prov index to Mercator) now that
     # the scheduler built the caches, so the first alert isn't slowed by it and no
     # cartopy runs in the main process mid-request. Best-effort (swallows errors).

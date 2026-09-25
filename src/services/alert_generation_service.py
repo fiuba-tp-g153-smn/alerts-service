@@ -483,6 +483,7 @@ class AlertGenerationService:  # pylint: disable=too-few-public-methods
                 "all_departments": all_departments,
                 "output_dir": self.settings.output_dir,
                 "cache_dir": self.settings.alert_cache_dir,
+                "watermark_path": self.settings.watermark_path,
                 "dept_index_serialized": dept_index_serialized,
                 "prov_geoms_serialized": prov_geoms_serialized,
             }
