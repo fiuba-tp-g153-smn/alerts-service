@@ -77,3 +77,7 @@ tests/departments_*.geojson
 .mypy_cache
 
 CODE_REVIEW.md
+
+# SMN brand watermark: not versioned. Uploaded to the server by hand and
+# located via WATERMARK_PATH (see README, "Variables de Entorno").
+data_alerts/trama_smn.png

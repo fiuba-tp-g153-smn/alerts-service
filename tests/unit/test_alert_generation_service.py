@@ -235,6 +235,7 @@ async def test_get_prov_geoms_serialized_computes_once_and_caches():
 def test_build_worker_payload_contains_all_worker_fields(service):
     service.settings.output_dir = "/out"
     service.settings.alert_cache_dir = "/cache"
+    service.settings.watermark_path = "/app/assets/trama_smn.png"
 
     payload = service._build_worker_payload(
         GEOMETRY,
@@ -257,10 +258,12 @@ def test_build_worker_payload_contains_all_worker_fields(service):
         "all_departments",
         "output_dir",
         "cache_dir",
+        "watermark_path",
         "dept_index_serialized",
         "prov_geoms_serialized",
     }
     assert data["dept_index_serialized"] == [{"bbox": [0, 0, 1, 1], "wkb_hex": "00"}]
+    assert data["watermark_path"] == "/app/assets/trama_smn.png"
 
 
 async def test_prewarm_render_geometry_is_best_effort(service, tmp_path):
