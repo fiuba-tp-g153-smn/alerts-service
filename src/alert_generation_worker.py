@@ -61,10 +61,6 @@ FONT_SEMIBOLD = FontProperties(fname="/app/data_alerts/EncodeSans-SemiBold.ttf")
 DEFAULT_WATERMARK_PATH = "/app/data_alerts/trama_smn.png"
 # The pattern PNG already carries its intended opacity in its alpha channel.
 WATERMARK_ALPHA = 1.0
-# The pattern is a portrait strip, too narrow to cover the canvas on its own.
-# Two side-by-side copies span it at native proportions. It is never tiled
-# vertically: the pattern has blank top/bottom rows that would show as seams.
-WATERMARK_TILE_X = 2
 HEADER_LOGO_PATH = "/app/data_alerts/logo_smn_header.png"
 INSET_SVG_PATH = "/app/data_alerts/cuarteron.svg"
 # Pre-rasterised corner-inset PNG, built by scheduler._build_cuarteron_cache_sync
@@ -503,6 +499,11 @@ def _load_ign_layers(cache_path: str) -> dict:
 def _add_watermark(fig, watermark_path: str):
     """Add the SMN pattern watermark over the map area (not header/phenom).
 
+    The asset is drawn full bleed over the map band, edge to edge: it is
+    authored at exactly that size (1100x913 for this 1100x1120 canvas), so it
+    needs no scaling or tiling and nothing spills onto the header/phenomenon
+    bands above.
+
     The asset is not versioned (it is SMN brand material): in production it is
     uploaded to the server by hand and located via the WATERMARK_PATH env var,
     so a missing file is an expected state and only warns.
@@ -514,21 +515,15 @@ def _add_watermark(fig, watermark_path: str):
         )
         return
 
-    img = np.tile(plt.imread(watermark_path), (1, WATERMARK_TILE_X, 1))
-
-    # Large watermark: almost touches the bottom edge of the phenomenon
-    # (MAP_TOP), never overlaps it.
-    wm_y = 0.02
-    gap = 0.015
-    wm_h = MAP_TOP - wm_y - gap  # height = almost the whole map area
-    fw_in, fh_in = fig.get_size_inches()
-    img_aspect = img.shape[1] / img.shape[0]  # width / height, in pixels
-    wm_w = wm_h * (fh_in / fw_in) * img_aspect  # axes box matches image aspect
-    wm_x = (1.0 - wm_w) / 2.0
-    ax_wm = fig.add_axes([wm_x, wm_y, wm_w, wm_h], facecolor="none")
+    ax_wm = fig.add_axes([0.0, 0.0, 1.0, MAP_TOP], facecolor="none")
     ax_wm.set_zorder(100)
     ax_wm.axis("off")
-    ax_wm.imshow(img, alpha=WATERMARK_ALPHA, zorder=100)
+    ax_wm.imshow(
+        plt.imread(watermark_path),
+        alpha=WATERMARK_ALPHA,
+        zorder=100,
+        aspect="auto",  # the asset already matches the band's proportions
+    )
 
 
 def _load_index(path: str) -> list:

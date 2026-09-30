@@ -2,8 +2,8 @@
 
 The real asset is SMN brand material and is NOT in the repo: it is uploaded to
 the server by hand and located via WATERMARK_PATH. So these tests build their
-own stand-in pattern with the same 472x770 proportions instead of reading it,
-and they must keep passing on a clean checkout where the asset is absent.
+own stand-in pattern at the asset's authored size instead of reading it, and
+they must keep passing on a clean checkout where the asset is absent.
 """
 
 import numpy as np
@@ -17,16 +17,16 @@ from settings import Settings
 # Same canvas both generate_*_gif functions build: 13.75x14 in @ 80 dpi.
 FIG_SIZE = (13.75, 14)
 FIG_DPI = 80
+CANVAS_W, CANVAS_H = 1100, 1120
 
-# Native size of the SMN pattern, which the geometry is derived from.
-PATTERN_W, PATTERN_H = 472, 770
-PATTERN_ASPECT = PATTERN_W / PATTERN_H
+# The asset is authored to fill the map band exactly, so no scaling is needed.
+ASSET_W, ASSET_H = 1100, 913
 
 
 @pytest.fixture(name="pattern_file")
 def pattern_file_fixture(tmp_path):
-    """A stand-in RGBA pattern with the real asset's dimensions."""
-    pixels = np.zeros((PATTERN_H, PATTERN_W, 4), dtype=np.uint8)
+    """A stand-in RGBA pattern at the real asset's authored size."""
+    pixels = np.zeros((ASSET_H, ASSET_W, 4), dtype=np.uint8)
     pixels[..., 3] = 40  # faint, like the real pattern's baked-in opacity
     path = tmp_path / "trama_smn.png"
     Image.fromarray(pixels, mode="RGBA").save(path)
@@ -42,38 +42,39 @@ def _watermark_axes(pattern_file):
     return axes[0]
 
 
-def test_watermark_keeps_the_pattern_proportions(pattern_file):
-    """The axes box matches the tiled pattern, so logos are never distorted."""
+def test_canvas_matches_the_size_the_asset_was_authored_for():
+    """The asset is cut to this canvas; a resize here would silently stretch it."""
+    assert (FIG_SIZE[0] * FIG_DPI, FIG_SIZE[1] * FIG_DPI) == (CANVAS_W, CANVAS_H)
+
+
+def test_watermark_covers_the_map_band_edge_to_edge(pattern_file):
+    """Full bleed: the whole width, from the bottom up to the phenomenon band."""
     bbox = _watermark_axes(pattern_file).get_position()
 
-    box_aspect = (bbox.width * FIG_SIZE[0]) / (bbox.height * FIG_SIZE[1])
-    assert abs(box_aspect - worker.WATERMARK_TILE_X * PATTERN_ASPECT) < 1e-6
+    assert (bbox.x0, bbox.y0) == (0.0, 0.0)
+    assert bbox.width == 1.0
+    assert bbox.height == worker.MAP_TOP
 
 
-def test_watermark_covers_the_canvas_width(pattern_file):
-    """Two tiles span nearly the whole canvas without overflowing it."""
+def test_watermark_band_matches_the_asset_pixel_size(pattern_file):
+    """The band the watermark fills is the size the asset was designed at."""
     bbox = _watermark_axes(pattern_file).get_position()
 
-    assert bbox.width > 0.95
-    assert bbox.x0 >= 0
-    assert bbox.x1 <= 1.0
+    assert round(bbox.width * CANVAS_W) == ASSET_W
+    assert round(bbox.height * CANVAS_H) == ASSET_H
 
 
-def test_watermark_never_reaches_the_phenomenon_band(pattern_file):
-    """The watermark stays inside the map band, below the phenomenon strip."""
+def test_watermark_never_overlaps_the_phenomenon_band(pattern_file):
+    """Full bleed stops at MAP_TOP, leaving header and phenomenon untouched."""
     bbox = _watermark_axes(pattern_file).get_position()
 
-    assert bbox.y0 > 0
-    assert bbox.y1 < worker.MAP_TOP
+    assert bbox.y1 <= worker.MAP_TOP
+    assert bbox.y1 < worker.PHENOM_Y + worker.PHENOM_H
 
 
-def test_watermark_is_not_tiled_vertically(pattern_file):
-    """The pattern has blank top/bottom rows, so vertical tiling would seam."""
-    bbox = _watermark_axes(pattern_file).get_position()
-
-    width_in = bbox.width * FIG_SIZE[0]
-    height_in = bbox.height * FIG_SIZE[1]
-    assert width_in / height_in > 1, "a vertical tile would make the box taller"
+def test_watermark_is_not_rescaled(pattern_file):
+    """aspect='auto' fills the band; 'equal' would letterbox it instead."""
+    assert _watermark_axes(pattern_file).get_aspect() == "auto"
 
 
 def test_missing_asset_skips_the_watermark_instead_of_failing(tmp_path):
