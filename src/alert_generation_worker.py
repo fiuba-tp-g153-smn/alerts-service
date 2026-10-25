@@ -14,7 +14,7 @@ Input JSON:
     "all_departments": [{...}],
     "output_dir": "/app/output/alerts",
     "cache_dir": "/app/cache",
-    "watermark_path": "/app/data_alerts/trama_smn.png"
+    "watermark_path": "/app/watermark/trama_smn.png"
 }
 
 Output JSON:
@@ -58,7 +58,7 @@ import matplotlib.pyplot as plt  # pylint: disable=wrong-import-position,import-
 FONT_BLACK = FontProperties(fname="/app/data_alerts/EncodeSans-Black.ttf")
 FONT_MEDIUM = FontProperties(fname="/app/data_alerts/EncodeSans-Medium.ttf")
 FONT_SEMIBOLD = FontProperties(fname="/app/data_alerts/EncodeSans-SemiBold.ttf")
-DEFAULT_WATERMARK_PATH = "/app/data_alerts/trama_smn.png"
+DEFAULT_WATERMARK_PATH = "/app/watermark/trama_smn.png"
 # The pattern PNG already carries its intended opacity in its alpha channel.
 WATERMARK_ALPHA = 1.0
 HEADER_LOGO_PATH = "/app/data_alerts/logo_smn_header.png"
@@ -505,7 +505,7 @@ def _add_watermark(fig, watermark_path: str):
     bands above.
 
     The asset is not versioned (it is SMN brand material): in production it is
-    uploaded to the server by hand and located via the WATERMARK_PATH env var,
+    uploaded to the server by hand and mounted via the WATERMARK_DIR env var,
     so a missing file is an expected state and only warns.
     """
     if not os.path.exists(watermark_path):

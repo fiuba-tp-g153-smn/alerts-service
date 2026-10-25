@@ -1,7 +1,7 @@
 """Unit tests for the SMN pattern watermark drawn on both alert GIFs.
 
 The real asset is SMN brand material and is NOT in the repo: it is uploaded to
-the server by hand and located via WATERMARK_PATH. So these tests build their
+the server by hand and mounted via WATERMARK_DIR. So these tests build their
 own stand-in pattern at the asset's authored size instead of reading it, and
 they must keep passing on a clean checkout where the asset is absent.
 """
@@ -88,16 +88,16 @@ def test_missing_asset_skips_the_watermark_instead_of_failing(tmp_path):
 
 def test_worker_default_path_points_at_the_asset_directory():
     """The payload fallback keeps working for callers that omit the path."""
-    assert worker.DEFAULT_WATERMARK_PATH.endswith("/data_alerts/trama_smn.png")
+    assert worker.DEFAULT_WATERMARK_PATH.endswith("/watermark/trama_smn.png")
 
 
 def test_settings_reads_watermark_path_from_the_environment(monkeypatch):
-    """Production locates the hand-uploaded asset through WATERMARK_PATH."""
-    monkeypatch.setenv("WATERMARK_PATH", "/app/assets/trama_smn.png")
-    assert Settings().watermark_path == "/app/assets/trama_smn.png"
+    """WATERMARK_PATH overrides the default (e.g. a renamed file)."""
+    monkeypatch.setenv("WATERMARK_PATH", "/srv/other/logo.png")
+    assert Settings().watermark_path == "/srv/other/logo.png"
 
 
 def test_settings_falls_back_to_the_baked_in_path(monkeypatch):
-    """Without the env var, dev keeps using the bind-mounted data_alerts copy."""
+    """Without the env var, the mounted /app/watermark copy is used."""
     monkeypatch.delenv("WATERMARK_PATH", raising=False)
     assert Settings().watermark_path == worker.DEFAULT_WATERMARK_PATH

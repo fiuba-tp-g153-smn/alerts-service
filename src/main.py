@@ -51,13 +51,13 @@ async def lifespan(_app: FastAPI):  # pylint: disable=too-many-statements
         layer_retrier.start()
 
     # Brand asset deliberately kept out of the repo (uploaded to the server by
-    # hand, located via WATERMARK_PATH). Missing it only costs the watermark, so
+    # hand, mounted via WATERMARK_DIR). Missing it only costs the watermark, so
     # startup continues — but say so loudly, since the render subprocess's own
     # warning goes to its stderr and nobody reads it.
     if not os.path.exists(settings.watermark_path):
         logger.error(
             "Watermark asset missing at %s - alert GIFs will render without it. "
-            "Upload it to the server and check WATERMARK_PATH.",
+            "Upload it to the server and check WATERMARK_DIR.",
             settings.watermark_path,
         )
 

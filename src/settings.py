@@ -65,9 +65,9 @@ class Settings:  # pylint: disable=too-many-instance-attributes,too-few-public-m
     # Alert Generation
     output_dir: str = ""
     alert_cache_dir: str = ""
-    # Brand asset kept out of the repo: baked into the image in dev, mounted by
-    # hand on the server in production (see README).
-    watermark_path: str = "/app/data_alerts/trama_smn.png"
+    # Brand asset kept out of the repo: both compose files mount the directory
+    # holding it at /app/watermark (WATERMARK_DIR on the host, see README).
+    watermark_path: str = "/app/watermark/trama_smn.png"
     alerts_detail_level: int = 7
 
     # Asynchronous alert generation (background worker pool)
