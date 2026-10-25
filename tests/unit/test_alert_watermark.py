@@ -1,7 +1,7 @@
 """Unit tests for the SMN pattern watermark drawn on both alert GIFs.
 
 The real asset is SMN brand material and is NOT in the repo: it is uploaded to
-the server by hand and mounted via WATERMARK_DIR. So these tests build their
+the server by hand and mounted via WATERMARK_FILE. So these tests build their
 own stand-in pattern at the asset's authored size instead of reading it, and
 they must keep passing on a clean checkout where the asset is absent.
 """
@@ -83,6 +83,15 @@ def test_missing_asset_skips_the_watermark_instead_of_failing(tmp_path):
     worker._add_watermark(  # pylint: disable=protected-access
         fig, str(tmp_path / "does_not_exist.png")
     )
+    assert not fig.axes
+
+
+def test_directory_in_place_of_the_asset_skips_the_watermark(tmp_path):
+    """Docker mounts an empty directory for a missing file; treat it as missing."""
+    fig = Figure(figsize=FIG_SIZE, dpi=FIG_DPI)
+    mounted_dir = tmp_path / "trama_smn.png"
+    mounted_dir.mkdir()
+    worker._add_watermark(fig, str(mounted_dir))  # pylint: disable=protected-access
     assert not fig.axes
 
 

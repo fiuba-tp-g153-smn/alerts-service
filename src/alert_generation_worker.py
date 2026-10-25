@@ -505,10 +505,11 @@ def _add_watermark(fig, watermark_path: str):
     bands above.
 
     The asset is not versioned (it is SMN brand material): in production it is
-    uploaded to the server by hand and mounted via the WATERMARK_DIR env var,
-    so a missing file is an expected state and only warns.
+    uploaded to the server by hand and mounted via the WATERMARK_FILE env var,
+    so a missing file is an expected state and only warns. isfile, not exists:
+    Docker mounts an empty directory in place of a missing file.
     """
-    if not os.path.exists(watermark_path):
+    if not os.path.isfile(watermark_path):
         print(
             f"WARNING: Watermark not found at path: {watermark_path}",
             file=sys.stderr,
