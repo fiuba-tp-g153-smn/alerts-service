@@ -97,9 +97,9 @@ en `data_alerts/` — está en `.gitignore`, así que no hay riesgo de commitear
 Sin el archivo el servicio arranca igual y los avisos se generan, pero salen **sin marca de agua**,
 y el log de arranque lo avisa con un `ERROR`. Para desarrollar eso alcanza.
 
-En producción el archivo se sube a mano al servidor y se apunta con dos variables:
-`ASSETS_HOST_DIR` al directorio del host que lo contiene (se monta read-only en `/app/assets`) y
-`WATERMARK_PATH=/app/assets/trama_smn.png`.
+En producción el archivo se sube a mano a un directorio del servidor y se apunta `WATERMARK_DIR`
+a ese directorio (se monta read-only en `/app/watermark`). Si el archivo tuviera otro nombre,
+`WATERMARK_PATH` permite indicar la ruta completa dentro del contenedor.
 
 `.env.example` incluye además las credenciales de S3 (`S3_ENDPOINT`, `S3_ACCESS_KEY`, `S3_SECRET_KEY`, `S3_BUCKET_NAME`, `S3_SECURE`), las de MySQL (base propia y `taviso` externa de solo lectura), `MANAGE_DB_SCHEMAS` —que habilita o inhibe las migraciones MySQL, sin afectar las migraciones SQLite de jobs y métricas— y los directorios `OUTPUT_DIR` / `ALERT_CACHE_DIR`. Las URLs WFS del IGN (`COUNTRY_GEOJSON_URL`, `DEPARTMENTS_GEOJSON_URL`, `PROVINCES_GEOJSON_URL`) tienen default en el código y solo se declaran para sobrescribirlas.
 
