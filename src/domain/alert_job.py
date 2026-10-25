@@ -4,6 +4,9 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Optional
 
+# Non-fatal submission warning: the alert renders, but without the SMN watermark.
+WATERMARK_MISSING = "watermark_missing"
+
 
 class JobStatus(Enum):
     """Lifecycle states of a background alert generation job."""
@@ -43,3 +46,4 @@ class PreparedAlert:
 
     phenomenon_text: str
     polygon_str: str
+    warnings: tuple[str, ...] = ()
