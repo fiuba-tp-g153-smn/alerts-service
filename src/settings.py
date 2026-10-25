@@ -91,6 +91,8 @@ class Settings:  # pylint: disable=too-many-instance-attributes,too-few-public-m
         {
             "layer_update_cron",
             "layer_cache_ttl_minutes",
+            "layer_sync_retry_initial_seconds",
+            "layer_sync_retry_max_seconds",
             "alerts_detail_level",
             "alerts_job_workers",
             "alerts_job_queue_maxsize",
@@ -140,6 +142,12 @@ class Settings:  # pylint: disable=too-many-instance-attributes,too-few-public-m
 
         self.layer_update_cron = flat.get("layer_update_cron", "0 3 * * 0")
         self.layer_cache_ttl_minutes = int(flat.get("layer_cache_ttl_minutes", 30))
+        self.layer_sync_retry_initial_seconds = float(
+            flat.get("layer_sync_retry_initial_seconds", 30.0)
+        )
+        self.layer_sync_retry_max_seconds = float(
+            flat.get("layer_sync_retry_max_seconds", 600.0)
+        )
         self.alerts_detail_level = int(flat.get("alerts_detail_level", 7))
         self.alerts_job_workers = int(flat.get("alerts_job_workers", 2))
         self.alerts_job_queue_maxsize = int(flat.get("alerts_job_queue_maxsize", 16))
@@ -243,6 +251,13 @@ class Settings:  # pylint: disable=too-many-instance-attributes,too-few-public-m
         logger.info("DEPARTMENTS_GEOJSON_URL: %s", self.departments_geojson_url)
         logger.info("LAYER_UPDATE_CRON: %s", self.layer_update_cron)
         logger.info("LAYER_CACHE_TTL_MINUTES: %s", self.layer_cache_ttl_minutes)
+        logger.info(
+            "LAYER_SYNC_RETRY_INITIAL_SECONDS: %s",
+            self.layer_sync_retry_initial_seconds,
+        )
+        logger.info(
+            "LAYER_SYNC_RETRY_MAX_SECONDS: %s", self.layer_sync_retry_max_seconds
+        )
 
         for level, tolerance in self.detail_level_tolerances.items():
             logger.info("DETAIL_LEVEL_TOLERANCE_%s: %s", level, tolerance)

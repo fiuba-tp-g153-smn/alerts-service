@@ -20,6 +20,7 @@ from ports.geo_layer_processor import IGeoLayerProcessor
 from services.geo_layer_sync_service import GeoLayerSyncService
 from services.geo_layer_sync_service import _extract_date, _retry_async
 from services.layer_refresh_service import LayerRefreshService
+from services.layer_sync_retrier import LayerSyncRetrier
 
 _RAW_TMP_FILES = ["pais_raw_tmp.geojson", "departamentos_raw_tmp.geojson"]
 
@@ -58,8 +59,11 @@ def _sweep_orphaned_tmp_files(data_dir: str, logger: Logger) -> None:
 
 async def _ensure_alert_layers(
     settings, logger: Logger, processor: GeoLayerProcessor
-) -> None:
-    """Ensure alert-specific layers are present locally (simplified GeoJSON only)."""
+) -> bool:
+    """Ensure alert-specific layers are present locally (simplified GeoJSON only).
+
+    Returns True if every alert layer is ready.
+    """
     data_dir = settings.data_dir
     detail_level = settings.alerts_detail_level
     tolerance = settings.detail_level_tolerances.get(detail_level, 0.005)
@@ -72,6 +76,7 @@ async def _ensure_alert_layers(
         )
         return _extract_date(matches[-1]) if matches else None
 
+    all_ready = True
     for layer in _ALERT_LAYERS:
         if _local_date(layer["simplified_stem"]) is not None:
             logger.info(f"{layer['simplified_stem']}: ready.")
@@ -83,13 +88,15 @@ async def _ensure_alert_layers(
         except Exception as exc:  # pylint: disable=broad-exception-caught
             # A transient IGN/S3 failure must not abort startup (see BUG-03); log and
             # continue so the service comes up, degrading only alert rendering for this
-            # layer until it is regenerated on a later restart/cron.
+            # layer until the background LayerSyncRetrier regenerates it.
+            all_ready = False
             logger.error(
                 "Failed to prepare alert layer %s after retries: %s — continuing "
                 "startup without it",
                 layer["simplified_stem"],
                 exc,
             )
+    return all_ready
 
 
 async def _generate_alert_layer(
@@ -336,8 +343,56 @@ async def _build_inset_cache(settings, logger: Logger) -> None:
     await asyncio.to_thread(_build_inset_cache_sync, cache_dir, logger)
 
 
-async def setup_scheduler(settings, logger: Logger) -> AsyncIOScheduler:
-    """Configure and return an AsyncIOScheduler with the layer refresh cron job."""
+async def _refresh_alert_caches(
+    settings, logger: Logger, processor: GeoLayerProcessor
+) -> bool:
+    """Rebuild the alert caches once layers heal; True if every alert layer is ready.
+
+    The pickles are rebuilt in the geo_cache_worker subprocess, then the alert
+    service drops its in-memory indexes (cached empty after a degraded startup)
+    and re-projects them from the new pickles.
+    """
+    from container import get_singleton_alert_service
+
+    ready = await _ensure_alert_layers(settings, logger, processor)
+    await _build_alert_cache(settings, logger)
+    alert_service = get_singleton_alert_service()
+    alert_service.reset_render_caches()
+    await alert_service.prewarm_render_geometry()
+    return ready
+
+
+def _build_retrier(  # pylint: disable=too-many-arguments
+    settings,
+    logger: Logger,
+    processor: GeoLayerProcessor,
+    sync_service: GeoLayerSyncService,
+    layers_ok: bool,
+    alerts_ok: bool,
+) -> LayerSyncRetrier | None:
+    """Return a retrier when startup came up degraded, else None."""
+    if layers_ok and alerts_ok and not sync_service.s3_degraded:
+        return None
+
+    async def _refresh() -> bool:
+        return await _refresh_alert_caches(settings, logger, processor)
+
+    return LayerSyncRetrier(
+        sync_service,
+        _refresh,
+        caches_ready=layers_ok and alerts_ok,
+        initial_delay=settings.layer_sync_retry_initial_seconds,
+        max_delay=settings.layer_sync_retry_max_seconds,
+        logger=logger,
+    )
+
+
+async def setup_scheduler(
+    settings, logger: Logger
+) -> tuple[AsyncIOScheduler, LayerSyncRetrier | None]:
+    """Prepare geo layers and caches; return the cron scheduler and, when startup
+    came up degraded (S3 unreachable or layers missing), a not-yet-started
+    background retrier that heals them."""
     data_dir = settings.data_dir
     os.makedirs(data_dir, exist_ok=True)
 
@@ -347,8 +402,8 @@ async def setup_scheduler(settings, logger: Logger) -> AsyncIOScheduler:
     processor = GeoLayerProcessor(logger)
     sync_service = GeoLayerSyncService(settings, storage, processor, logger)
     await sync_service.ensure_all()
-    await sync_service.regenerate()
-    await _ensure_alert_layers(settings, logger, processor)
+    layers_ok = await sync_service.regenerate()
+    alerts_ok = await _ensure_alert_layers(settings, logger, processor)
     await _build_alert_cache(settings, logger)
     await _build_ign_cache(settings, logger)
     await _build_inset_cache(settings, logger)
@@ -376,4 +431,7 @@ async def setup_scheduler(settings, logger: Logger) -> AsyncIOScheduler:
     scheduler.add_job(_job, trigger, id="layer_refresh", replace_existing=True)
     logger.info(f"Scheduler configured with cron: {settings.layer_update_cron}")
 
-    return scheduler
+    retrier = _build_retrier(
+        settings, logger, processor, sync_service, layers_ok, alerts_ok
+    )
+    return scheduler, retrier

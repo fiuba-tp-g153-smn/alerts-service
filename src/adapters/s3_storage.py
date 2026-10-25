@@ -1,14 +1,17 @@
 """AWS S3-compatible object storage adapter using aioboto3."""
 
 import os
+from contextlib import asynccontextmanager
 from logging import Logger
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, AsyncIterator
 
 import aioboto3
 from botocore.config import Config
-from botocore.exceptions import BotoCoreError, ClientError, EndpointConnectionError
+from botocore.exceptions import BotoCoreError, ClientError
+from botocore.exceptions import ConnectionError as BotoConnectionError
+from botocore.exceptions import EndpointConnectionError, HTTPClientError
 
-from ports.object_storage import IObjectStorage
+from ports.object_storage import IObjectStorage, StorageUnavailableError
 
 if TYPE_CHECKING:
     from settings import Settings
@@ -42,17 +45,32 @@ class S3ObjectStorage(IObjectStorage):
             kwargs["endpoint_url"] = endpoint
         return kwargs
 
+    @asynccontextmanager
+    async def _client(self) -> AsyncIterator:
+        """Open an S3 client; transport failures become StorageUnavailableError.
+
+        BotoConnectionError (refused, connect timeout, TLS, proxy) and
+        HTTPClientError (reset, read timeout) are the transport-level failures.
+        Credential or bucket problems (ClientError, NoCredentialsError) are
+        misconfiguration, not outages, so they propagate unchanged.
+        """
+        try:
+            async with self._session.client("s3", **self._client_kwargs()) as s3:
+                yield s3
+        except (BotoConnectionError, HTTPClientError) as e:
+            raise StorageUnavailableError(f"S3 unreachable: {e}") from e
+
     async def upload(self, local_path: str, key: str) -> None:
         """Upload a local file to S3 under the given key."""
         self.logger.info(
             f"Uploading {local_path} → s3://{self.settings.s3_bucket_name}/{key}"
         )
-        async with self._session.client("s3", **self._client_kwargs()) as s3:
+        async with self._client() as s3:
             await s3.upload_file(local_path, self.settings.s3_bucket_name, key)
 
     async def list_keys(self, prefix: str) -> list[str]:
         """List all object keys in the bucket matching the given prefix."""
-        async with self._session.client("s3", **self._client_kwargs()) as s3:
+        async with self._client() as s3:
             resp = await s3.list_objects_v2(
                 Bucket=self.settings.s3_bucket_name, Prefix=prefix
             )
@@ -61,7 +79,7 @@ class S3ObjectStorage(IObjectStorage):
     async def delete(self, key: str) -> None:
         """Delete the object identified by key from S3."""
         self.logger.info(f"Deleting s3://{self.settings.s3_bucket_name}/{key}")
-        async with self._session.client("s3", **self._client_kwargs()) as s3:
+        async with self._client() as s3:
             await s3.delete_object(Bucket=self.settings.s3_bucket_name, Key=key)
 
     async def download(self, key: str, local_path: str) -> bool:
