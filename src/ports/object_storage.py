@@ -3,8 +3,16 @@
 from abc import ABC, abstractmethod
 
 
+class StorageUnavailableError(Exception):
+    """Raised when the storage backend cannot be reached (transient outage)."""
+
+
 class IObjectStorage(ABC):
-    """Abstract base class for async object storage implementations."""
+    """Abstract base class for async object storage implementations.
+
+    ``upload``, ``delete`` and ``list_keys`` raise StorageUnavailableError when the
+    backend is unreachable, so callers can degrade instead of crashing.
+    """
 
     @abstractmethod
     async def upload(self, local_path: str, key: str) -> None:

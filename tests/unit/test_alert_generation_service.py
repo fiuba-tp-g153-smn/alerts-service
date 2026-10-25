@@ -271,3 +271,20 @@ async def test_prewarm_render_geometry_is_best_effort(service, tmp_path):
     service.settings.alert_cache_dir = str(tmp_path)
     await service.prewarm_render_geometry()
     assert svc_mod._DEPT_INDEX_MERC_CACHE == []
+
+
+def test_reset_render_caches_clears_every_index_cache():
+    names = (
+        "_DEPT_INDEX_CACHE",
+        "_PROV_INDEX_CACHE",
+        "_DEPT_INDEX_MERC_CACHE",
+        "_PROV_GEOMS_MERC_CACHE",
+        "_DEPT_INDEX_SERIALIZED_CACHE",
+        "_PROV_GEOMS_SERIALIZED_CACHE",
+    )
+    for name in names:
+        setattr(svc_mod, name, [])  # e.g. the empty index a degraded start cached
+
+    AlertGenerationService.reset_render_caches()
+
+    assert all(getattr(svc_mod, name) is None for name in names)

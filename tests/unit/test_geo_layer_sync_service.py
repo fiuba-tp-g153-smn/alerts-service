@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from ports.geo_layer_processor import IGeoLayerProcessor
-from ports.object_storage import IObjectStorage
+from ports.object_storage import IObjectStorage, StorageUnavailableError
 from services.geo_layer_sync_service import GeoLayerSyncService
 
 
@@ -327,3 +327,90 @@ async def test_regenerate_persistent_download_failure_is_non_fatal(
     assert mock_processor.download.await_count == service._MAX_RETRIES
     mock_processor.simplify.assert_not_awaited()
     service.logger.error.assert_called()
+
+
+# ── S3 unreachable (degraded, local-only) ────────────────────────────────────
+
+
+async def test_ensure_all_falls_back_to_local_only_when_s3_unreachable(
+    service, mock_storage, tmp_path
+):
+    mock_storage.list_keys.side_effect = StorageUnavailableError("refused")
+    present = tmp_path / "pais_simple_L1_T0p001_20260322.geojson"
+    present.touch()
+
+    result = await service.ensure_all()  # does not raise
+
+    assert service.s3_degraded is True
+    assert present.exists()
+    missing = {layer["simplified_stem"]: levels for layer, levels in result}
+    assert missing["pais_simple"] == [(2, 0.01)]
+    assert missing["departamentos_simple"] == [(None, 0.005)]
+    mock_storage.upload.assert_not_called()
+
+
+async def test_ensure_all_clears_degraded_once_s3_is_back(service, mock_storage):
+    mock_storage.list_keys.side_effect = StorageUnavailableError("refused")
+    await service.ensure_all()
+
+    mock_storage.list_keys.side_effect = None
+    mock_storage.list_keys.return_value = []
+    await service.ensure_all()
+
+    assert service.s3_degraded is False
+
+
+async def test_regenerate_skips_upload_while_s3_degraded(
+    service, mock_storage, mock_settings, mock_processor
+):
+    mock_storage.list_keys.side_effect = StorageUnavailableError("refused")
+    mock_settings.country_geojson_url = "http://example.com/country.geojson"
+    mock_settings.departments_geojson_url = "http://example.com/depts.geojson"
+
+    async def fake_download(url, path):
+        Path(path).touch()
+
+    mock_processor.download.side_effect = fake_download
+    await service.ensure_all()
+
+    assert await service.regenerate() is True
+    mock_storage.upload.assert_not_called()
+
+
+async def test_regenerate_keeps_layer_when_upload_hits_s3_outage(
+    service, mock_storage, mock_settings, mock_processor
+):
+    service._RETRY_BACKOFF_BASE = 0
+    mock_settings.country_geojson_url = "http://example.com/country.geojson"
+    mock_storage.upload.side_effect = StorageUnavailableError("refused")
+    layer = {
+        "simplified_stem": "pais_simple",
+        "url_attr": "country_geojson_url",
+        "raw_tmp": "pais_raw_tmp.geojson",
+    }
+
+    async def fake_download(url, path):
+        Path(path).touch()
+
+    mock_processor.download.side_effect = fake_download
+    service._needs_regen = [(layer, [(1, 0.001)])]
+
+    assert await service.regenerate() is True
+    mock_processor.simplify.assert_awaited_once()
+    assert service.s3_degraded is True
+
+
+async def test_regenerate_returns_false_when_a_layer_fails(
+    service, mock_settings, mock_processor
+):
+    service._RETRY_BACKOFF_BASE = 0
+    mock_settings.country_geojson_url = "http://example.com/country.geojson"
+    mock_processor.download.side_effect = RuntimeError("IGN unreachable")
+    layer = {
+        "simplified_stem": "pais_simple",
+        "url_attr": "country_geojson_url",
+        "raw_tmp": "pais_raw_tmp.geojson",
+    }
+    service._needs_regen = [(layer, [(1, 0.001)])]
+
+    assert await service.regenerate() is False

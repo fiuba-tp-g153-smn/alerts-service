@@ -26,8 +26,9 @@ async def test_ensure_alert_layers_download_failure_is_non_fatal(tmp_path):
     processor.download.side_effect = RuntimeError("IGN 504")
 
     with patch(_SLEEP_PATH, new=AsyncMock()):
-        await _ensure_alert_layers(settings, logger, processor)  # must not raise
+        ready = await _ensure_alert_layers(settings, logger, processor)  # no raise
 
+    assert ready is False  # keeps the background retrier going
     assert processor.download.await_count == 3  # retried before giving up
     processor.simplify.assert_not_awaited()
     logger.error.assert_called()
@@ -70,3 +71,11 @@ async def test_ensure_alert_layers_cleans_raw_tmp_on_simplify_failure(tmp_path):
 
     assert not (tmp_path / "provincias_raw_tmp.geojson").exists()  # finally cleaned it
     logger.error.assert_called()
+
+
+async def test_ensure_alert_layers_reports_ready_when_present(tmp_path):
+    (tmp_path / "provincias_simple_L7_T0p005_20260322.geojson").touch()
+    processor = AsyncMock()
+
+    assert await _ensure_alert_layers(_settings(tmp_path), MagicMock(), processor)
+    processor.download.assert_not_awaited()

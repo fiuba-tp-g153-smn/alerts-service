@@ -70,7 +70,7 @@ Dependencias necesarias:
 
 ## Configuration
 
-La configuración se reparte entre `.env` (variables de entorno, credenciales y rutas) y `settings.json` (montado en `/config/settings.json`, para valores que se cambian sin rebuild). Los defaults viven en `src/settings.py`.
+La configuración se reparte entre `.env` (variables de entorno, credenciales y rutas) y `settings.json` (en `/config/settings.json`: copiado a la imagen de producción y montado desde el host en desarrollo). Los defaults viven en `src/settings.py`. Cambiar el archivo en producción requiere reconstruir la imagen.
 
 ### Variables de Entorno
 
@@ -101,7 +101,7 @@ En producción el archivo se sube a mano al servidor y se apunta con dos variabl
 `ASSETS_HOST_DIR` al directorio del host que lo contiene (se monta read-only en `/app/assets`) y
 `WATERMARK_PATH=/app/assets/trama_smn.png`.
 
-`.env.example` incluye además las credenciales de S3 (`S3_ENDPOINT`, `S3_ACCESS_KEY`, `S3_SECRET_KEY`, `S3_BUCKET_NAME`, `S3_SECURE`), las de MySQL (base propia y `taviso` externa de solo lectura), `MANAGE_DB_SCHEMAS` —que habilita o inhibe todas las migraciones de Alembic— y los directorios `OUTPUT_DIR` / `ALERT_CACHE_DIR`. Las URLs WFS del IGN (`COUNTRY_GEOJSON_URL`, `DEPARTMENTS_GEOJSON_URL`, `PROVINCES_GEOJSON_URL`) tienen default en el código y solo se declaran para sobrescribirlas.
+`.env.example` incluye además las credenciales de S3 (`S3_ENDPOINT`, `S3_ACCESS_KEY`, `S3_SECRET_KEY`, `S3_BUCKET_NAME`, `S3_SECURE`), las de MySQL (base propia y `taviso` externa de solo lectura), `MANAGE_DB_SCHEMAS` —que habilita o inhibe las migraciones MySQL, sin afectar las migraciones SQLite de jobs y métricas— y los directorios `OUTPUT_DIR` / `ALERT_CACHE_DIR`. Las URLs WFS del IGN (`COUNTRY_GEOJSON_URL`, `DEPARTMENTS_GEOJSON_URL`, `PROVINCES_GEOJSON_URL`) tienen default en el código y solo se declaran para sobrescribirlas.
 
 ### Tolerancias de simplificación
 
@@ -122,7 +122,7 @@ Los niveles 1 a 5 son los que acepta la API; el 7 es interno y lo usa la generac
 
 El servicio gestiona automáticamente los datos geográficos:
 
-1. **Al iniciar**: compara los archivos de `data/` contra S3 por fecha, descarga lo que falte y regenera desde el IGN lo que no esté en ninguno de los dos
+1. **Al iniciar**: compara los archivos de `data/` contra S3 por fecha, descarga lo que falte y regenera desde el IGN lo que no esté en ninguno de los dos. Si falla S3 o faltan capas, puede arrancar degradado y reintentar en segundo plano (espera inicial de 30 s, máxima de 600 s). `/health` no confirma que las capas estén disponibles
 2. **Simplificación**: genera un GeoJSON por nivel de detalle, fechado y con la tolerancia en el nombre (por ejemplo `pais_simple_L5_T0p01_20260314.geojson`)
 3. **Actualización**: cron de APScheduler, por defecto `0 3 * * 0` (domingos a las 3 AM), configurable en `settings.json` (`layer.update_cron`)
 4. **Caché**: los archivos quedan en `./data/` y las capas cargadas se cachean en memoria (`layer.cache_ttl_minutes`, 30 min); el historial de refrescos se guarda en SQLite

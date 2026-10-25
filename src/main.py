@@ -27,7 +27,7 @@ from services.metrics_sampler import MetricsSampler
 
 
 @asynccontextmanager
-async def lifespan(_app: FastAPI):
+async def lifespan(_app: FastAPI):  # pylint: disable=too-many-statements
     """Manage application startup (scheduler init) and shutdown lifecycle."""
     logger.info("Application startup: initializing scheduler ...")
 
@@ -38,7 +38,7 @@ async def lifespan(_app: FastAPI):
         loop.add_signal_handler(sig, setup_task.cancel)
 
     try:
-        scheduler = await setup_task
+        scheduler, layer_retrier = await setup_task
     except asyncio.CancelledError:
         logger.warning("Startup aborted by shutdown signal — exiting.")
         raise
@@ -47,6 +47,8 @@ async def lifespan(_app: FastAPI):
             loop.remove_signal_handler(sig)
 
     scheduler.start()
+    if layer_retrier is not None:
+        layer_retrier.start()
 
     # Brand asset deliberately kept out of the repo (uploaded to the server by
     # hand, located via WATERMARK_PATH). Missing it only costs the watermark, so
@@ -109,6 +111,8 @@ async def lifespan(_app: FastAPI):
     logger.info("Application shutdown: stopping scheduler ...")
     scheduler.shutdown()
     logger.info("Scheduler stopped.")
+    if layer_retrier is not None:
+        await layer_retrier.stop()
 
     # Stop the sampler first (it reads the processor + MySQL and writes metrics),
     # then drain in-flight alert jobs before closing DB pools so an in-flight

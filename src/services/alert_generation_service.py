@@ -440,6 +440,23 @@ class AlertGenerationService:  # pylint: disable=too-few-public-methods
                 result.append(department)
         return result
 
+    @staticmethod
+    def reset_render_caches() -> None:
+        """Drop the cached dept/prov indexes so the next use reloads them from disk.
+
+        Called after the alert caches are rebuilt in the background (layers healed
+        after a degraded startup); otherwise the empty indexes cached at startup
+        would be served forever. Plain rebinds are atomic on the event loop, so a
+        concurrent loader at worst repopulates from the new pickles.
+        """
+        # pylint: disable=global-statement
+        global _DEPT_INDEX_CACHE, _PROV_INDEX_CACHE, _DEPT_INDEX_MERC_CACHE
+        global _PROV_GEOMS_MERC_CACHE, _DEPT_INDEX_SERIALIZED_CACHE
+        global _PROV_GEOMS_SERIALIZED_CACHE
+        _DEPT_INDEX_CACHE = _PROV_INDEX_CACHE = None
+        _DEPT_INDEX_MERC_CACHE = _PROV_GEOMS_MERC_CACHE = None
+        _DEPT_INDEX_SERIALIZED_CACHE = _PROV_GEOMS_SERIALIZED_CACHE = None
+
     async def prewarm_render_geometry(self) -> None:
         """Project + cache the dept/prov index to Mercator at startup.
 

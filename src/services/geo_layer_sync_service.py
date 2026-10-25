@@ -7,7 +7,7 @@ from logging import Logger
 from typing import TYPE_CHECKING
 
 from ports.geo_layer_processor import IGeoLayerProcessor
-from ports.object_storage import IObjectStorage
+from ports.object_storage import IObjectStorage, StorageUnavailableError
 
 if TYPE_CHECKING:
     from settings import Settings
@@ -78,6 +78,7 @@ class GeoLayerSyncService:  # pylint: disable=too-few-public-methods
     - Downloads files missing locally from S3.
     - Uploads files missing in S3 from local.
     - Returns which layers/levels need re-generation.
+    - Falls back to local-only when S3 is unreachable (``s3_degraded``).
     """
 
     # Bounded exponential backoff for transient external I/O (IGN download, S3
@@ -97,6 +98,16 @@ class GeoLayerSyncService:  # pylint: disable=too-few-public-methods
         self.processor = processor
         self.logger = logger
         self._needs_regen: list[tuple[dict, list[tuple[int | None, float]]]] = []
+        self._s3_online = True
+
+    @property
+    def s3_degraded(self) -> bool:
+        """True when S3 is configured but the last sync could not reach it."""
+        return bool(self.settings.s3_bucket_name) and not self._s3_online
+
+    def _use_s3(self) -> bool:
+        """Whether S3 is configured and was reachable during this sync."""
+        return bool(self.settings.s3_bucket_name) and self._s3_online
 
     def _levels_for(self, layer: dict) -> dict[int | None, float]:
         """Return the {level: tolerance} map to reconcile/generate for the given layer."""
@@ -105,9 +116,29 @@ class GeoLayerSyncService:  # pylint: disable=too-few-public-methods
         return self.settings.detail_level_tolerances
 
     async def ensure_all(self) -> list[tuple[dict, list[tuple[int | None, float]]]]:
-        """Reconcile all layers. Returns list of (layer_info, missing_levels)."""
-        needs_regen = []
+        """Reconcile all layers. Returns list of (layer_info, missing_levels).
 
+        If S3 is unreachable, the pass is redone local-only and ``s3_degraded``
+        stays True until a later call reaches S3 again.
+        """
+        self._s3_online = True
+        try:
+            needs_regen = await self._reconcile_all()
+        except StorageUnavailableError as exc:
+            self.logger.warning(
+                "S3 unreachable (%s) — reconciling local-only; will retry in background",
+                exc,
+            )
+            self._s3_online = False
+            needs_regen = await self._reconcile_all()
+
+        self.logger.info("All geo layers reconciled.")
+        self._needs_regen = needs_regen
+        return needs_regen
+
+    async def _reconcile_all(self) -> list[tuple[dict, list[tuple[int | None, float]]]]:
+        """Reconcile every layer/level once; collect the levels needing re-generation."""
+        needs_regen = []
         for layer in LAYERS:
             missing_levels: list[tuple[int | None, float]] = []
             for level, tolerance in self._levels_for(layer).items():
@@ -116,24 +147,25 @@ class GeoLayerSyncService:  # pylint: disable=too-few-public-methods
 
             if missing_levels:
                 needs_regen.append((layer, missing_levels))
-
-        self.logger.info("All geo layers reconciled.")
-        self._needs_regen = needs_regen
         return needs_regen
 
-    async def regenerate(self) -> None:
+    async def regenerate(self) -> bool:
         """Download from IGN and re-generate any files flagged missing by ensure_all().
 
         Each layer is regenerated independently: a transient failure (after bounded
         retries) is logged and skipped rather than propagated, so one bad IGN/S3 hop
         can never abort application startup — it only leaves that layer missing,
         degrading the endpoints that need it instead of the whole service.
+
+        Returns True if every flagged layer was regenerated.
         """
         data_dir = self.settings.data_dir
+        all_ok = True
         for layer, missing_levels in self._needs_regen:
             try:
                 await self._regenerate_layer(layer, missing_levels, data_dir)
             except Exception as exc:  # pylint: disable=broad-exception-caught
+                all_ok = False
                 self.logger.error(
                     "Failed to regenerate layer %s after retries: %s — continuing "
                     "startup without it",
@@ -142,6 +174,7 @@ class GeoLayerSyncService:  # pylint: disable=too-few-public-methods
                 )
 
         self.logger.info("Geo layer regeneration complete.")
+        return all_ok
 
     async def _regenerate_layer(
         self, layer: dict, missing_levels: list, data_dir: str
@@ -170,17 +203,22 @@ class GeoLayerSyncService:  # pylint: disable=too-few-public-methods
                 )
                 simplified_path = os.path.join(data_dir, versioned)
                 await self.processor.simplify(raw_tmp, simplified_path, tolerance)
-                if self.settings.s3_bucket_name:
-                    await self._retry(
-                        self.storage.upload,
-                        simplified_path,
-                        versioned,
-                        description=f"upload {versioned}",
-                    )
+                if self._use_s3():
+                    await self._upload_backup(simplified_path, versioned)
 
         finally:
             if os.path.exists(raw_tmp):
                 os.remove(raw_tmp)
+
+    async def _upload_backup(self, path: str, key: str) -> None:
+        """Back up a generated file to S3; an outage only marks S3 degraded."""
+        try:
+            await self._retry(
+                self.storage.upload, path, key, description=f"upload {key}"
+            )
+        except StorageUnavailableError as exc:
+            self.logger.warning("S3 unreachable, keeping %s local-only: %s", key, exc)
+            self._s3_online = False
 
     async def _retry(self, func, *args, description: str):
         """Await ``func(*args)`` with this service's bounded exponential backoff."""
@@ -275,7 +313,7 @@ class GeoLayerSyncService:  # pylint: disable=too-few-public-methods
         canonical_date: str,
     ) -> None:
         """Upload the file to S3 if it is missing there."""
-        if self.settings.s3_bucket_name and s3_date != canonical_date:
+        if self._use_s3() and s3_date != canonical_date:
             self.logger.info(f"{canonical_filename}: missing from S3, uploading ...")
             await self.storage.upload(canonical_path, canonical_filename)
 
@@ -287,6 +325,6 @@ class GeoLayerSyncService:  # pylint: disable=too-few-public-methods
 
     async def _s3_keys(self, prefix: str, ext: str) -> list[str]:
         """Return S3 keys with the given prefix that end with ext."""
-        if not self.settings.s3_bucket_name:
+        if not self._use_s3():
             return []
         return [k for k in await self.storage.list_keys(prefix) if k.endswith(ext)]
