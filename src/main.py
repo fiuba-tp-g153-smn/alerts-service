@@ -51,14 +51,14 @@ async def lifespan(_app: FastAPI):  # pylint: disable=too-many-statements
         layer_retrier.start()
 
     # Brand asset deliberately kept out of the repo (uploaded to the server by
-    # hand, mounted via WATERMARK_FILE). Missing it only costs the watermark, so
+    # hand, mounted via WATERMARK_DIR). Missing it only costs the watermark, so
     # startup continues — but say so loudly, since the render subprocess's own
     # warning goes to its stderr and nobody reads it.
-    # isfile, not exists: Docker mounts an empty directory for a missing file.
+    # isfile, not exists: a directory at that path is not an image either.
     if not os.path.isfile(settings.watermark_path):
         logger.error(
             "Watermark asset missing at %s - alert GIFs will render without it. "
-            "Upload it to the server and check WATERMARK_FILE.",
+            "Put trama_smn.png in the WATERMARK_DIR folder.",
             settings.watermark_path,
         )
 

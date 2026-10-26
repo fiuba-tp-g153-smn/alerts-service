@@ -146,7 +146,7 @@ async def test_validate_request_warns_when_watermark_missing(service, watermark_
 async def test_validate_request_warns_when_watermark_is_a_directory(
     service, watermark_file
 ):
-    """Docker mounts an empty directory in place of a missing file."""
+    """A directory where the asset should be counts as a missing asset."""
     watermark_file.unlink()
     watermark_file.mkdir()
 

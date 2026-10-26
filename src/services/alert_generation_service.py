@@ -114,7 +114,7 @@ class AlertGenerationService:  # pylint: disable=too-few-public-methods
     def _submission_warnings(self) -> tuple[str, ...]:
         """Non-fatal issues the client should surface; the alert still renders.
 
-        isfile, not exists: Docker mounts an empty directory for a missing file.
+        isfile, not exists: a directory at that path is not an image either.
         """
         if os.path.isfile(self.settings.watermark_path):
             return ()

@@ -62,10 +62,8 @@ services:
       - alerts_service_data:/app/data
       - alerts_output:/app/output/alerts
       # SMN watermark: not in the repo, uploaded to the server by hand.
-      # WATERMARK_FILE is its path on the host. If it is missing, Docker
-      # creates an empty directory there instead; the app treats that as a
-      # missing watermark and renders without it.
-      - ${WATERMARK_FILE:-./data_alerts/trama_smn.png}:/app/watermark/trama_smn.png:ro
+      # WATERMARK_DIR is the host folder holding trama_smn.png.
+      - ${WATERMARK_DIR:-./data_alerts}:/app/watermark:ro
     environment:
       - LOG_LEVEL=${LOG_LEVEL}
       - APP_ENV=${APP_ENV}

@@ -79,5 +79,6 @@ tests/departments_*.geojson
 CODE_REVIEW.md
 
 # SMN brand watermark: not versioned. Uploaded to the server by hand and
-# located via WATERMARK_PATH (see README, "Variables de Entorno").
-data_alerts/trama_smn.png
+# mounted via WATERMARK_DIR (see README, "Marca de agua"). Ignored anywhere
+# in the repo so a copy left outside data_alerts/ can't be committed either.
+trama_smn.png

@@ -65,8 +65,8 @@ class Settings:  # pylint: disable=too-many-instance-attributes,too-few-public-m
     # Alert Generation
     output_dir: str = ""
     alert_cache_dir: str = ""
-    # Brand asset kept out of the repo: compose mounts it here (WATERMARK_FILE
-    # on the host in production, data_alerts/ in dev; see README).
+    # Brand asset kept out of the repo: compose mounts the WATERMARK_DIR host
+    # folder (default data_alerts/) at /app/watermark; see README.
     watermark_path: str = "/app/watermark/trama_smn.png"
     alerts_detail_level: int = 7
 
