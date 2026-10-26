@@ -56,7 +56,8 @@ async def generate_alert(
     `400` and an oversized polygon returns `413`), then the heavy work
     (intersection + GIF rendering + DB insert) runs in a background worker.
 
-    Returns `202 Accepted` with a `job_id`. Poll `GET /alerts/jobs/{job_id}` for
+    Returns `202 Accepted` with a `job_id` and any non-fatal `warnings` (e.g.
+    `watermark_missing`). Poll `GET /alerts/jobs/{job_id}` for
     the outcome; on success the alert appears in `GET /alerts/pending`. If the
     queue is saturated, returns `503`.
     """
@@ -91,6 +92,7 @@ async def generate_alert(
         phenomenon_code=phenomenon_code,
         phenomenon=prepared.phenomenon_text,
         polygon=prepared.polygon_str,
+        warnings=list(prepared.warnings),
     )
 
 

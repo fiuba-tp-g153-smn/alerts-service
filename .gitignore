@@ -77,3 +77,8 @@ tests/departments_*.geojson
 .mypy_cache
 
 CODE_REVIEW.md
+
+# SMN brand watermark: not versioned. Uploaded to the server by hand and
+# mounted via WATERMARK_DIR (see README, "Marca de agua"). Ignored anywhere
+# in the repo so a copy left outside data_alerts/ can't be committed either.
+trama_smn.png

@@ -61,6 +61,9 @@ services:
     volumes:
       - alerts_service_data:/app/data
       - alerts_output:/app/output/alerts
+      # SMN watermark: not in the repo, uploaded to the server by hand.
+      # WATERMARK_DIR is the host folder holding trama_smn.png.
+      - ${WATERMARK_DIR:-./data_alerts}:/app/watermark:ro
     environment:
       - LOG_LEVEL=${LOG_LEVEL}
       - APP_ENV=${APP_ENV}

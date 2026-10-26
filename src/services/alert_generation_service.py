@@ -14,7 +14,7 @@ import cartopy.crs as ccrs
 from shapely import wkb as shapely_wkb
 from shapely.geometry import Point, shape
 
-from domain.alert_job import PreparedAlert
+from domain.alert_job import WATERMARK_MISSING, PreparedAlert
 from domain.models import AreaTooLargeError, PolygonTooLargeError
 from ports.mysql_repository import IMySQLRepository
 from services.geo_intersection_service import GeoIntersectionService
@@ -105,7 +105,20 @@ class AlertGenerationService:  # pylint: disable=too-few-public-methods
 
         polygon_str = self._format_polygon(geometry)
         await self._validate_polygon_size(polygon_str)
-        return PreparedAlert(phenomenon_text=phenomenon_text, polygon_str=polygon_str)
+        return PreparedAlert(
+            phenomenon_text=phenomenon_text,
+            polygon_str=polygon_str,
+            warnings=self._submission_warnings(),
+        )
+
+    def _submission_warnings(self) -> tuple[str, ...]:
+        """Non-fatal issues the client should surface; the alert still renders.
+
+        isfile, not exists: a directory at that path is not an image either.
+        """
+        if os.path.isfile(self.settings.watermark_path):
+            return ()
+        return (WATERMARK_MISSING,)
 
     async def generate_alert(  # pylint: disable=too-many-locals
         self, geometry: dict, phenomenon_code: int, phenomenon_text: str | None = None
@@ -500,6 +513,7 @@ class AlertGenerationService:  # pylint: disable=too-few-public-methods
                 "all_departments": all_departments,
                 "output_dir": self.settings.output_dir,
                 "cache_dir": self.settings.alert_cache_dir,
+                "watermark_path": self.settings.watermark_path,
                 "dept_index_serialized": dept_index_serialized,
                 "prov_geoms_serialized": prov_geoms_serialized,
             }

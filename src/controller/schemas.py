@@ -1,7 +1,7 @@
 """Pydantic input schemas for geo intersection endpoints."""
 
 from datetime import datetime, timezone
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from pydantic import (
     BaseModel,
@@ -119,12 +119,15 @@ class AlertJobAccepted(BaseModel):
     Generation runs in the background; poll `GET /alerts/jobs/{job_id}` for the
     outcome. The echoed `phenomenon` and `polygon` let the client render an
     optimistic "processing" placeholder before the alert is generated.
+    `warnings` lists non-fatal issues to show the user (e.g.
+    `watermark_missing`: the GIFs will render without the SMN watermark).
     """
 
     job_id: str
     phenomenon_code: int
     phenomenon: str
     polygon: str
+    warnings: List[str] = Field(default_factory=list)
 
 
 class AlertJobStatus(BaseModel):

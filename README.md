@@ -88,6 +88,20 @@ LOG_LEVEL=INFO
 SETTINGS_FILE=/config/settings.json
 ```
 
+### Marca de agua
+
+La trama del SMN que se imprime sobre los mapas (`data_alerts/trama_smn.png`) **no está en el
+repositorio**: es material de marca y se distribuye aparte. Pedísela a alguien del equipo y dejala
+en `data_alerts/` — está en `.gitignore`, así que no hay riesgo de commitearla por accidente.
+
+Sin el archivo el servicio arranca igual y los avisos se generan, pero salen **sin marca de agua**,
+y el log de arranque lo avisa con un `ERROR`. Para desarrollar eso alcanza.
+
+En producción el archivo se sube a mano a una carpeta del servidor y se apunta `WATERMARK_DIR` a
+esa carpeta (por ejemplo `/home/<usuario>/alerts-assets`); el archivo dentro tiene que llamarse
+`trama_smn.png`. La misma variable sirve en desarrollo para usar otra carpeta en vez de `data_alerts/`. Si falta, el servicio arranca igual, el log
+lo avisa y el visualizador muestra una advertencia al generar el aviso.
+
 `.env.example` incluye además las credenciales de S3 (`S3_ENDPOINT`, `S3_ACCESS_KEY`, `S3_SECRET_KEY`, `S3_BUCKET_NAME`, `S3_SECURE`), las de MySQL (base propia y `taviso` externa de solo lectura), `MANAGE_DB_SCHEMAS` —que habilita o inhibe las migraciones MySQL, sin afectar las migraciones SQLite de jobs y métricas— y los directorios `OUTPUT_DIR` / `ALERT_CACHE_DIR`. Las URLs WFS del IGN (`COUNTRY_GEOJSON_URL`, `DEPARTMENTS_GEOJSON_URL`, `PROVINCES_GEOJSON_URL`) tienen default en el código y solo se declaran para sobrescribirlas.
 
 ### Tolerancias de simplificación

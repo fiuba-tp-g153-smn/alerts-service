@@ -4,7 +4,12 @@ import pytest
 from fastapi.testclient import TestClient
 
 from container import get_alert_service, get_job_processor
-from domain.alert_job import AlertJobRecord, JobStatus, PreparedAlert
+from domain.alert_job import (
+    WATERMARK_MISSING,
+    AlertJobRecord,
+    JobStatus,
+    PreparedAlert,
+)
 
 _GEOJSON = {
     "type": "Polygon",
@@ -77,8 +82,21 @@ def test_post_returns_202_and_submits(make_client):
         "phenomenon_code": 1,
         "phenomenon": "TORMENTAS",
         "polygon": "[-34.60,-58.50]",
+        "warnings": [],
     }
     assert processor.submissions == [(1, "TORMENTAS")]
+
+
+def test_post_returns_validation_warnings(make_client):
+    prepared = PreparedAlert(
+        "TORMENTAS", "[-34.60,-58.50]", warnings=(WATERMARK_MISSING,)
+    )
+    client = make_client(_FakeAlertService(prepared=prepared), _FakeProcessor())
+
+    resp = _post(client)
+
+    assert resp.status_code == 202
+    assert resp.json()["warnings"] == [WATERMARK_MISSING]
 
 
 def test_post_invalid_phenomenon_returns_400(make_client):

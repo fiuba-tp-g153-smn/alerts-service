@@ -6,7 +6,7 @@ import pytest
 from shapely.geometry import Polygon
 
 import services.alert_generation_service as svc_mod
-from domain.alert_job import PreparedAlert
+from domain.alert_job import WATERMARK_MISSING, PreparedAlert
 from domain.models import AreaTooLargeError, PolygonTooLargeError
 from services.alert_generation_service import AlertGenerationService
 
@@ -46,8 +46,16 @@ AFFECTED_DEPARTMENTS = [
 ]
 
 
+@pytest.fixture(name="watermark_file")
+def watermark_file_fixture(tmp_path):
+    """A present watermark asset, so warnings stay empty unless a test removes it."""
+    path = tmp_path / "trama_smn.png"
+    path.write_bytes(b"png")
+    return path
+
+
 @pytest.fixture
-def service():
+def service(watermark_file):
     mysql_repo = MagicMock()
     mysql_repo.get_phenomenon_text.return_value = "TORMENTAS FUERTES"
     mysql_repo.insert_alert.return_value = 42
@@ -60,6 +68,7 @@ def service():
 
     settings = MagicMock()
     settings.alert_simplification_level = 5
+    settings.watermark_path = str(watermark_file)
 
     svc = AlertGenerationService(mysql_repo, geo_service, settings, MagicMock())
     svc._filter_departments_by_departments = AsyncMock(
@@ -118,6 +127,32 @@ async def test_validate_request_returns_prepared_alert(service):
     assert prepared.polygon_str == (
         "[-34.60,-58.50],[-34.60,-58.40],[-34.50,-58.40],[-34.60,-58.50]"
     )
+
+
+async def test_validate_request_has_no_warnings_when_watermark_present(service):
+    prepared = await service.validate_request(GEOMETRY, phenomenon_code=10)
+
+    assert not prepared.warnings
+
+
+async def test_validate_request_warns_when_watermark_missing(service, watermark_file):
+    watermark_file.unlink()
+
+    prepared = await service.validate_request(GEOMETRY, phenomenon_code=10)
+
+    assert prepared.warnings == (WATERMARK_MISSING,)
+
+
+async def test_validate_request_warns_when_watermark_is_a_directory(
+    service, watermark_file
+):
+    """A directory where the asset should be counts as a missing asset."""
+    watermark_file.unlink()
+    watermark_file.mkdir()
+
+    prepared = await service.validate_request(GEOMETRY, phenomenon_code=10)
+
+    assert prepared.warnings == (WATERMARK_MISSING,)
 
 
 async def test_validate_request_rejects_unknown_phenomenon(service):
@@ -235,6 +270,7 @@ async def test_get_prov_geoms_serialized_computes_once_and_caches():
 def test_build_worker_payload_contains_all_worker_fields(service):
     service.settings.output_dir = "/out"
     service.settings.alert_cache_dir = "/cache"
+    service.settings.watermark_path = "/app/watermark/trama_smn.png"
 
     payload = service._build_worker_payload(
         GEOMETRY,
@@ -257,10 +293,12 @@ def test_build_worker_payload_contains_all_worker_fields(service):
         "all_departments",
         "output_dir",
         "cache_dir",
+        "watermark_path",
         "dept_index_serialized",
         "prov_geoms_serialized",
     }
     assert data["dept_index_serialized"] == [{"bbox": [0, 0, 1, 1], "wkb_hex": "00"}]
+    assert data["watermark_path"] == "/app/watermark/trama_smn.png"
 
 
 async def test_prewarm_render_geometry_is_best_effort(service, tmp_path):

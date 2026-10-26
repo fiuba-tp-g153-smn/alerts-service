@@ -50,6 +50,18 @@ async def lifespan(_app: FastAPI):  # pylint: disable=too-many-statements
     if layer_retrier is not None:
         layer_retrier.start()
 
+    # Brand asset deliberately kept out of the repo (uploaded to the server by
+    # hand, mounted via WATERMARK_DIR). Missing it only costs the watermark, so
+    # startup continues — but say so loudly, since the render subprocess's own
+    # warning goes to its stderr and nobody reads it.
+    # isfile, not exists: a directory at that path is not an image either.
+    if not os.path.isfile(settings.watermark_path):
+        logger.error(
+            "Watermark asset missing at %s - alert GIFs will render without it. "
+            "Put trama_smn.png in the WATERMARK_DIR folder.",
+            settings.watermark_path,
+        )
+
     # Pre-warm the render geometry (project dept/prov index to Mercator) now that
     # the scheduler built the caches, so the first alert isn't slowed by it and no
     # cartopy runs in the main process mid-request. Best-effort (swallows errors).
